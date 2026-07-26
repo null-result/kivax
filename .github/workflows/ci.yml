@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 permissions:
@@ -143,3 +143,33 @@ jobs:
         # bin/kivax is passed explicitly: it has no .py extension (it's meant to
         # be executed directly), so ruff's discovery wouldn't pick it up.
         run: ruff check . bin/kivax
+
+  commitlint:
+    # Enforces Conventional Commits (see commitlint.config.js) on every commit
+    # in the PR — the branch ruleset requires this job on main.
+    name: commitlint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+
+  required-checks:
+    # The branch ruleset requires exactly this one context. Matrix jobs
+    # (test, install) produce a different check name per OS/Python
+    # combination, which is brittle to require directly — add a Python
+    # version and you'd have to remember to update the ruleset too. This
+    # job aggregates all of them into one stable name instead.
+    name: required checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [test, coverage, install, lint, commitlint]
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs did not succeed."
+            exit 1
+          fi

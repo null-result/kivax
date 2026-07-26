@@ -136,6 +136,29 @@ especially where a choice looks arbitrary — why the lock stays a flat map, why
 `sync-reqs` is the one command that must not span every feature. Keep that habit;
 it's most of what makes this code approachable.
 
+## Branching model and commit messages
+
+`main` and `develop` are both protected by a GitHub ruleset: no direct pushes,
+no force-pushes, no deletion — everything lands through a pull request.
+
+- **`develop`** is the integration branch. Branch off it for day-to-day work:
+  - `feature/<slug>` — new functionality, branches from and merges back into `develop`.
+  - `release/<version>` — stabilizes `develop` before a release; merges into
+    both `main` and `develop`.
+  - `hotfix/<slug>` — urgent fix branched from `main`; merges into both `main`
+    and `develop`.
+- **`main`** only receives merges from `release/*` or `hotfix/*` branches and
+  always reflects what's released. It also requires the `required checks` CI
+  job (which aggregates test, coverage, lint, install, and commitlint) to pass
+  before merging.
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
+`<type>(<scope>): <description>`, e.g. `fix(trace): guard lock against dropped entries`
+or `feat(cli): add kivax feature switch`. Common types: `feat`, `fix`, `docs`,
+`refactor`, `test`, `chore`. `commitlint.config.js` (extending
+`@commitlint/config-conventional`) is what the `commitlint` CI job checks PR
+commits against — a non-conforming commit message fails the check.
+
 ## Opening a pull request
 
 Small and focused beats large and complete. If you're planning something
