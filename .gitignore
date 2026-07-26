@@ -5,6 +5,7 @@ __pycache__/
 
 # Local assistant/editor state — personal, not part of the project
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Local editor/tool state
 .venv/
