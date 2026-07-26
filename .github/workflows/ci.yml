@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The full suite (unit + integration + e2e), run everywhere the README
+    # claims support — including Windows, whose support was until now
+    # asserted rather than verified. No coverage measurement here: that's a
+    # separate, ubuntu-only job below, so a coverage-instrumentation quirk on
+    # one OS/version combination can't block the functional signal from the
+    # rest of the matrix.
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pyyaml pytest
+
+      - name: Configure git
+        # Tests create throwaway repositories and set user.name/email per
+        # repo themselves; this only silences the default-branch hint.
+        run: git config --global init.defaultBranch main
+
+      - name: Run the test suite
+        run: pytest tests
+
+  coverage:
+    # The 90% gate. Runs once, on ubuntu, separately from the functional
+    # matrix above — coverage.py's branch counting can differ subtly by
+    # Python version, and there's no value in enforcing the numeric gate
+    # more than once per push.
+    name: coverage (>= 90%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pyyaml pytest pytest-cov
+
+      - name: Configure git
+        run: git config --global init.defaultBranch main
+
+      - name: Run the test suite with coverage
+        # .coveragerc sets `fail_under = 90` — this fails the step (and the
+        # job) the moment coverage drops under that, independent of whether
+        # every individual test passed.
+        run: pytest tests --cov=. --cov-config=.coveragerc --cov-report=term-missing
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: ignore
+
+  install:
+    # install.py is the very first thing every user runs, and it symlinks
+    # into ~/.local/bin — something a test in the suite above deliberately
+    # never does, since that would touch whichever machine runs it. A
+    # disposable CI runner is the right place to exercise it for real,
+    # symlink included.
+    name: install.py (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install into the default location
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python3 install.py
+
+      - name: The CLI is on PATH and reports a version
+        run: |
+          kivax version
+          kivax version | grep -q "version: "
+
+      - name: A fresh project initializes and passes doctor
+        run: |
+          mkdir -p /tmp/demo && cd /tmp/demo
+          git init -q .
+          git config user.email ci@example.invalid
+          git config user.name CI
+          # runtimes(6, defaults) / greenfield=y / phases / features root /
+          # language / stack profile / base branch
+          printf '\n\n\n\n\n\ny\n\n\n\npython-pytest\n\n' | kivax init
+          test -d specs
+          test ! -f specs/spec.md   # no feature exists yet at init time
+          kivax feature new checkout
+          test -f specs/01-checkout/spec.md
+          kivax doctor
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+      - name: Lint
+        # bin/kivax is passed explicitly: it has no .py extension (it's meant to
+        # be executed directly), so ruff's discovery wouldn't pick it up.
+        run: ruff check . bin/kivax

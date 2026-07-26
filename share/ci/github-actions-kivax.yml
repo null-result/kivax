@@ -1,0 +1,32 @@
+# Kivax gate for CI. Copy this job into your workflow and adjust the way
+# kivax is installed to however you distribute it (internal artifact, submodule, custom script).
+# This example assumes an install.py reachable from your own infrastructure;
+# adjust the path/URL before using it.
+name: kivax-gate
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  kivax-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      # --- install kivax on the runner (adjust to your distribution) ---
+      # - run: curl -fsSL https://your-internal-artifacts/kivax/install.py | python3
+      # - run: echo "$HOME/.kivax/bin" >> "$GITHUB_PATH"
+      # Both commands span EVERY feature's spec, not just the one this PR
+      # touches: that's the anchoring guarantee. A failure naming a feature
+      # unrelated to this PR means its spec drifted from its tests and needs
+      # the kivax-evolve flow — it is not a false positive.
+      - name: Validate every feature's canonical spec
+        run: kivax validate
+      # --- tests for the active stack(s) in .kivax/config.yml ---
+      # - uses: actions/setup-java@v4
+      #   with: { distribution: temurin, java-version: "21" }
+      # - run: ./mvnw -q test
+      # - run: ./mvnw -q verify -Pintegration
+      - name: Traceability audit (fails if NOT PASSING)
+        run: kivax trace

@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Only the GitHub Actions used by the workflows above. Kivax itself has a
+  # single external dependency (PyYAML) and no lockfile, so there is no Python
+  # ecosystem here for Dependabot to watch.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

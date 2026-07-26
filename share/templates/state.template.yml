@@ -1,0 +1,14 @@
+# Flow state, version 2. Written by 'kivax feature new' / 'kivax state ...' —
+# you rarely edit it by hand.
+#
+# ONE active feature at a time, per git branch: on the branch for feature 02 it
+# is 02 that's active; git already gives the isolation. Features worked on
+# earlier are archived under 'features:' and can be made active again with
+# 'kivax feature switch <NN>'.
+#
+# 'history' lives inside each feature record rather than at the top level on
+# purpose: every branch appends to this file, and a single shared list would
+# conflict on every merge.
+version: 2
+active: null           # {number, slug, phase, requirements: {...}, history: [...]}
+features: {}           # "01": {slug, phase, requirements, history}

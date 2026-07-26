@@ -1,0 +1,1255 @@
+#!/usr/bin/env python3
+"""kivax — Kivax CLI (spec-anchored SDD flow).
+
+Usage:
+  kivax init [--force]     Install/configure Kivax in the current project (wizard).
+                             Copies agents/skills into the project as
+                             real, editable, git-committed files — no symlinks.
+  kivax feature <new|list|show|switch> [args]
+                             Feature lifecycle. Kivax keeps ONE spec per feature,
+                             each in its own directory under paths.features:
+                               specs/01-booking/{spec.md,spec.yml,plan.md}
+                             'new <slug>' allocates the next number and seeds it;
+                             'show --json' is how the agents resolve paths;
+                             'switch <NN>' picks which feature the flow drives
+                             (one active feature per git branch).
+  kivax upgrade [--dry-run] Pull updates from the global store into files you
+                             haven't customized; flags conflicts instead of
+                             overwriting anything you've changed.
+  kivax promote <kind> <name> [--model-only]
+                             [--runtime claude|opencode|cursor|vscode-copilot|copilot-cli|codex]
+                             Push a local agent/skill (or just its
+                             model: field) back to the global store, so it
+                             becomes the default for future projects.
+  kivax doctor               Diagnose the current project's installation.
+  kivax version               Version of the installed global store.
+  kivax validate|hash|trace|state|wiki|specfirst [args...]
+                              Passes control to the matching script.
+
+KIVAX_HOME (default ~/.kivax) must point to the global store created by
+install.py.
+
+Design note: nothing propagates automatically between the global store and a
+project, in either direction. 'kivax init' copies once. 'kivax upgrade' pulls
+changes in, but only when you run it, and never over something you've edited.
+'kivax promote' pushes a change out, but only when you run it. Every agent
+file in your project is a plain, ordinary file you can open and edit directly
+— to pin a model for one agent, for example, just change its `model:` line.
+"""
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("ERROR: PyYAML is missing. Install with: pip install pyyaml --break-system-packages")
+
+KIVAX_HOME = Path(os.environ.get("KIVAX_HOME", str(Path.home() / ".kivax")))
+LIB = KIVAX_HOME / "lib"
+RUNTIME = KIVAX_HOME / "runtime"
+TEMPLATES = KIVAX_HOME / "templates"
+STACK_CATALOG = LIB / "stack_profiles.yml"
+
+# Agents are not stored pre-rendered per runtime: AGENTS_SRC holds one
+# canonical file per specialist (description + tools + body only), and
+# AGENT_RUNTIMES_CFG declares the frontmatter shape each runtime needs.
+# AGENT_CACHE is where they get rendered into on every 'init'/'upgrade'/
+# 'promote' — regenerated fresh each time, never hand-edited, never synced.
+AGENTS_SRC = KIVAX_HOME / "agents"
+AGENT_RUNTIMES_CFG = LIB / "agent_runtimes.yml"
+AGENT_CACHE = KIVAX_HOME / "_generated" / "agents"
+# Body-only orchestrator for AGENTS.md / copilot-instructions.md (runtimes that
+# use an ambient context file instead of a dedicated agent directory).
+AGENT_CACHE_BODY = KIVAX_HOME / "_generated" / "orchestrator-body.md"
+
+
+def regenerate_agents() -> None:
+    sys.path.insert(0, str(LIB))
+    import kivax_agents
+    cfg = kivax_agents.load_runtime_configs(AGENT_RUNTIMES_CFG)
+    kivax_agents.generate_all(AGENTS_SRC, cfg, AGENT_CACHE)
+    # Strip frontmatter from the orchestrator for runtimes that need a plain
+    # markdown ambient context file (AGENTS.md, copilot-instructions.md).
+    orch_src = AGENTS_SRC / "orchestrator.md"
+    if orch_src.is_file():
+        _, _, body = kivax_agents.parse_canonical(orch_src)
+        AGENT_CACHE_BODY.parent.mkdir(parents=True, exist_ok=True)
+        AGENT_CACHE_BODY.write_text(body.lstrip("\n"), encoding="utf-8")
+
+PASSTHROUGH = {"validate", "hash", "trace", "state", "wiki", "specfirst"}
+
+# (key, human label, default answer) — key is what ends up in .kivax/config.yml's
+# 'runtimes' list and every runtime-keyed dict in this file. 'vscode-copilot' and
+# 'copilot-cli' are deliberately distinct keys (never bare 'copilot'): they're
+# different products (VS Code extension vs. terminal CLI) with different file
+# conventions.
+RUNTIME_CHOICES = [
+    ("claude", "Claude Code", True),
+    ("opencode", "opencode", False),
+    ("cursor", "Cursor", False),
+    ("vscode-copilot", "GitHub Copilot in VS Code", False),
+    ("copilot-cli", "GitHub Copilot CLI", False),
+    ("codex", "OpenAI Codex CLI", False),
+]
+
+SOURCE_MARKER_EXTS = {
+    ".java", ".kt", ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".php",
+    ".c", ".cpp", ".cs", ".rs", ".scala", ".swift",
+}
+SPEC_DIR_CANDIDATES = ["specs", "spec", "docs/specs", "docs/spec", "requirements",
+                       "docs/requirements"]
+
+
+# --------------------------------------------------------------------------- helpers
+def ask(prompt: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        try:
+            ans = input(f"{prompt}{suffix}: ").strip()
+        except EOFError:
+            ans = ""
+        if ans:
+            return ans
+        if default is not None:
+            return default
+        print("  (an answer is required)")
+
+
+def ask_yesno(prompt: str, default: bool) -> bool:
+    d = "Y/n" if default else "y/N"
+    while True:
+        try:
+            ans = input(f"{prompt} [{d}]: ").strip().lower()
+        except EOFError:
+            ans = ""
+        if not ans:
+            return default
+        if ans in ("y", "yes"):
+            return True
+        if ans in ("n", "no"):
+            return False
+        print("  please answer y/n")
+
+
+def sh(cmd: list[str], cwd: Path) -> str:
+    try:
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True)
+        return r.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def require_kivax_home() -> None:
+    if not (LIB / "kivax_lib.py").is_file():
+        sys.exit(f"ERROR: can't find the Kivax global store at {KIVAX_HOME}.\n"
+                 f"Did you run install.py? If you installed it elsewhere, export "
+                 f"KIVAX_HOME=<path> before invoking kivax.")
+
+
+def require_project() -> tuple[Path, dict]:
+    root = Path.cwd()
+    config_path = root / ".kivax" / "config.yml"
+    if not config_path.is_file():
+        sys.exit("ERROR: .kivax/config.yml does not exist. Run 'kivax init' first.")
+    return root, yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------- detection
+def find_source_files(root: Path, limit: int = 20) -> list[Path]:
+    out = []
+    for p in root.rglob("*"):
+        if len(out) >= limit:
+            break
+        if not p.is_file():
+            continue
+        parts = set(p.relative_to(root).parts)
+        if parts & {".git", "node_modules", "target", "build", "dist", "venv",
+                    ".venv", "__pycache__", ".kivax"}:
+            continue
+        if p.suffix in SOURCE_MARKER_EXTS:
+            out.append(p)
+    return out
+
+
+def find_existing_specs_dir(root: Path) -> Path | None:
+    """A directory that already looks like it holds specs — either Kivax's own
+    per-feature layout (<dir>/NN-slug/spec.md) or a pre-existing corpus of loose
+    markdown. Either way it's only a suggestion the human confirms."""
+    for cand in SPEC_DIR_CANDIDATES:
+        d = root / cand
+        if d.is_dir() and (any(d.glob("*/spec.md")) or any(d.glob("*.md"))):
+            return d
+    return None
+
+
+def detect_stacks(root: Path, catalog: dict) -> list[tuple[str, str]]:
+    """Returns [(profile, relative_root)] detected via markers, searching the
+    root and its first-level subdirectories (monorepo support)."""
+    found: list[tuple[str, str]] = []
+    search_dirs = [root] + [d for d in root.iterdir()
+                            if d.is_dir() and d.name not in
+                            {".git", "node_modules", ".kivax", "target", "build", "dist"}]
+    for d in search_dirs:
+        rel = "" if d == root else d.name
+        for name, prof in catalog.items():
+            if any((d / marker).exists() for marker in prof.get("detect_markers", [])):
+                if (name, rel) not in found:
+                    found.append((name, rel))
+    return found
+
+
+def detect_base_branch(root: Path) -> str:
+    out = sh(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], root)
+    if out:
+        return out.rsplit("/", 1)[-1]
+    out = sh(["git", "branch", "--show-current"], root)
+    return out or "main"
+
+
+# --------------------------------------------------------------------------- sync (copy-based)
+def file_hash(p: Path) -> str:
+    return "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def sync_pairs(runtimes: list[str]) -> list[tuple[Path, Path]]:
+    """(project_relative_path, upstream_source_path) for every file Kivax
+    manages in a project. This is the single definition consumed by init,
+    upgrade, and promote, so all three agree on what's tracked.
+
+    There are two kinds of runtime-specific content: agents (specialist
+    personas with isolated context — only for runtimes that support real
+    subagent delegation) and skills (everything else, including the
+    phase-driver workflows — SKILL.md is a cross-tool standard, so one set
+    of files serves every runtime). Agents are generated fresh from the
+    canonical sources on every call (cheap — regenerate_agents() just
+    re-renders ~30 small files), so they're never stale relative to
+    agents/*.md or agent_runtimes.yml."""
+    regenerate_agents()
+    runtimes_set = set(runtimes)
+    pairs: list[tuple[Path, Path]] = []
+
+    if "claude" in runtimes:
+        pairs += [(Path(".claude/agents") / p.name, p)
+                 for p in sorted((AGENT_CACHE / "claude").glob("*.md"))]
+        # Claude Code doesn't read AGENTS.md natively (only CLAUDE.md) — so
+        # CLAUDE.md is generated too, from the exact same source as AGENTS.md
+        # below (same body, two destination filenames, never out of sync).
+        pairs.append((Path("CLAUDE.md"), AGENT_CACHE_BODY))
+    if "opencode" in runtimes:
+        pairs += [(Path(".opencode/agent") / p.name, p)
+                 for p in sorted((AGENT_CACHE / "opencode").glob("*.md"))]
+    if "cursor" in runtimes:
+        pairs += [(Path(".cursor/agents") / p.name, p)
+                 for p in sorted((AGENT_CACHE / "cursor").glob("*.md"))]
+    if "copilot-cli" in runtimes:
+        pairs += [(Path(".github/agents") / p.name, p)
+                 for p in sorted((AGENT_CACHE / "copilot-cli").glob("*.agent.md"))]
+    if "vscode-copilot" in runtimes:
+        pairs.append((Path(".github/copilot-instructions.md"), AGENT_CACHE_BODY))
+
+    # AGENTS.md is the shared orchestrator body for every runtime that uses an
+    # ambient context file (all except vscode-copilot, which uses copilot-
+    # instructions.md — claude gets both AGENTS.md and CLAUDE.md, above). The
+    # body is stripped of frontmatter since AGENTS.md is plain markdown, not
+    # an agent definition file.
+    if {"claude", "opencode", "cursor", "copilot-cli", "codex"} & runtimes_set:
+        pairs.append((Path("AGENTS.md"), AGENT_CACHE_BODY))
+
+    # Skills: 4 shared reference skills + 13 phase-driver skills, copied
+    # unchanged into every active runtime's own skills directory.
+    skill_dest_dirs: list[Path] = []
+    if "claude" in runtimes:
+        skill_dest_dirs.append(Path(".claude/skills"))
+    if "opencode" in runtimes:
+        skill_dest_dirs.append(Path(".opencode/skills"))
+    if "cursor" in runtimes:
+        skill_dest_dirs.append(Path(".cursor/skills"))
+    if "codex" in runtimes:
+        skill_dest_dirs.append(Path(".codex/skills"))
+    if {"vscode-copilot", "copilot-cli"} & runtimes_set:
+        skill_dest_dirs.append(Path(".github/skills"))
+    for dest_dir in skill_dest_dirs:
+        pairs += [(dest_dir / p.parent.name / p.name, p)
+                 for p in sorted((RUNTIME / "skills").glob("*/SKILL.md"))]
+
+    pairs += [(Path(".kivax/templates") / p.name, p)
+             for p in sorted(TEMPLATES.glob("*"))]
+    return pairs
+
+
+def copy_all(root: Path, runtimes: list[str]) -> dict[str, str]:
+    """Initial copy (kivax init): every tracked file, unconditionally.
+    Returns the sync manifest to write to .kivax/sync.json."""
+    manifest: dict[str, str] = {}
+    for rel, source in sync_pairs(runtimes):
+        dest = root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(source.read_bytes())
+        manifest[str(rel)] = file_hash(source)
+    return manifest
+
+
+def load_manifest(root: Path) -> dict[str, str]:
+    p = root / ".kivax" / "sync.json"
+    if p.is_file():
+        import json
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return {}
+    return {}
+
+
+def save_manifest(root: Path, manifest: dict[str, str]) -> None:
+    import json
+    p = root / ".kivax" / "sync.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- kivax init
+def cmd_init(argv: list[str]) -> int:
+    require_kivax_home()
+    root = Path.cwd()
+    kivax_dir = root / ".kivax"
+    config_path = kivax_dir / "config.yml"
+    force = "--force" in argv
+
+    if config_path.is_file() and not force:
+        print("'.kivax/config.yml' already exists in this project. Nothing to do here —\n"
+              "use 'kivax upgrade' to pull updates from the global store, or\n"
+              "'kivax doctor' to check the project's status.")
+        return 0
+
+    print("== Installing Kivax in this project ==\n")
+
+    # 1) runtimes
+    print("Which AI coding assistant(s) do you use in this project?")
+    runtimes = []
+    for key, label, default in RUNTIME_CHOICES:
+        if ask_yesno(f"  Do you use {label}?", default):
+            runtimes.append(key)
+    if not runtimes:
+        runtimes = [key for key, _, _ in RUNTIME_CHOICES]
+        print("You picked none; I'll install for all supported runtimes just in case.")
+
+    # 2) greenfield vs existing
+    sources = find_source_files(root)
+    heuristic_greenfield = len(sources) < 3
+    print(f"\nI found {len(sources)}{'+' if len(sources) >= 20 else ''} source code "
+          f"file(s) in this repo.")
+    greenfield = ask_yesno("Is this a greenfield project (no meaningful existing code)?",
+                           heuristic_greenfield)
+
+    include_constitution_architecture = ask_yesno(
+        "\nInclude the constitution and architecture phases? (a one-time CONSTITUTION.md "
+        "with the project's non-negotiable principles, and an ARCHITECTURE.md kept current "
+        "as the project evolves — recommended)", True)
+
+    # 3) features folder — Kivax keeps ONE directory per feature under this
+    # root (specs/01-booking/, specs/02-cancel/...), so it must be a folder
+    # Kivax can own the layout of. If the project already has a corpus of loose
+    # spec documents, point this somewhere else and keep that corpus as
+    # reference material: Kivax never reads or migrates it.
+    print("\nKivax keeps one spec per feature: one directory per feature "
+          "(e.g. 01-booking/)\nholding its own spec.md, spec.yml, and plan.md, "
+          "all under a single root folder.")
+    existing_specs = None if greenfield else find_existing_specs_dir(root)
+    if existing_specs:
+        rel = existing_specs.relative_to(root)
+        loose = [p.name for p in existing_specs.glob("*.md")]
+        if loose:
+            print(f"\nNOTE: '{rel}' already contains loose markdown "
+                  f"({', '.join(loose[:3])}{'...' if len(loose) > 3 else ''}).\n"
+                  f"Kivax won't read, move, or migrate those files — it would just "
+                  f"create its\nper-feature directories alongside them. A separate "
+                  f"folder is usually cleaner.")
+        if ask_yesno(f"Use '{rel}' as the features root anyway?", not loose):
+            specs_dir = str(rel)
+        else:
+            specs_dir = ask("Where should the features root be?", "specs/features"
+                            if loose else "specs")
+    else:
+        specs_dir = ask("\nWhere should the features root be?", "specs")
+    specs_dir = specs_dir.strip("/")
+
+    # 4) spec language — decoupled from every other language in the system
+    # (the CLI, agents, and skills are always English; only the
+    # prose CONTENT of spec.md follows this, regardless of what language you
+    # write your requests in). Any value works: the spec-analyst translates
+    # on the fly, no per-language files needed.
+    spec_language = ask(
+        "\nWhat language should spec.md content be written in? (e.g. en, es, fr, ja...)\n"
+        "This only affects spec content, not this CLI or the agents themselves.",
+        "en")
+
+    # 5) stack
+    catalog = yaml.safe_load(STACK_CATALOG.read_text(encoding="utf-8"))
+    detected = [] if greenfield else detect_stacks(root, catalog)
+    stack_profiles: dict[str, dict] = {}
+    active: list[str] = []
+    if detected:
+        print("\nDetected stacks:")
+        for name, rel in detected:
+            label = catalog[name]["label"]
+            where = rel or "(root)"
+            print(f"  - {label}  [{where}]")
+        if ask_yesno("Confirm these profiles?", True):
+            for name, rel in detected:
+                prof_name = name if not rel else f"{name}-{rel}"
+                prof = {k: v for k, v in catalog[name].items() if k != "label"}
+                prof["root"] = rel
+                stack_profiles[prof_name] = prof
+                active.append(prof_name)
+    if not stack_profiles:
+        print("\nAvailable profiles:", ", ".join(catalog.keys()))
+        chosen = ask("Which profile to use? (comma-separate if several)", "java-spring")
+        for name in [c.strip() for c in chosen.split(",") if c.strip()]:
+            if name not in catalog:
+                print(f"  '{name}' isn't in the catalog; adding it empty, edit it by hand later.")
+                stack_profiles[name] = {"root": "", "test_globs": [], "id_tag_regexes": [],
+                                        "cmd_test_unit": "", "cmd_test_it": "", "cmd_lint": ""}
+            else:
+                prof = {k: v for k, v in catalog[name].items() if k != "label"}
+                prof["root"] = ""
+                stack_profiles[name] = prof
+            active.append(name)
+
+    # 6) git base branch
+    base_branch = detect_base_branch(root)
+    base_branch = ask("\nBase branch for PRs and diff comparisons", base_branch)
+
+    # 7) legacy_globs (only if not greenfield)
+    legacy_globs: list[str] = []
+    if not greenfield:
+        proposed = sorted({f"{rel}/**" if rel else "src/**"
+                           for _, rel in (detected or [("", "src")])})
+        # A pre-existing corpus of spec documents living OUTSIDE the features
+        # root belongs here too. Those are documents, not production code, and
+        # without this the first edit to one of them lands in the audit's
+        # `production` bucket and reads as a spec-first violation. Skipped when
+        # the corpus IS the features root, since everything under that root is
+        # already recognized as a Kivax artifact.
+        corpus_glob = None
+        if existing_specs is not None:
+            corpus_rel = existing_specs.relative_to(root).as_posix()
+            if corpus_rel != specs_dir:
+                corpus_glob = f"{corpus_rel}/**"
+                proposed = sorted(set(proposed) | {corpus_glob})
+        print(f"\nPre-existing files proposed as exempt from REQ-traceability "
+              f"(legacy_globs): {proposed}")
+        if corpus_glob:
+            print(f"  '{corpus_glob}' covers the spec documents that were already in "
+                  f"this project,\n  so editing one isn't reported as untraced code. "
+                  f"Kivax's own features under\n  '{specs_dir}/' stay audited normally.")
+        if ask_yesno("Use this proposal as-is?", True):
+            legacy_globs = proposed
+        else:
+            raw = ask("Enter the globs separated by commas (empty = none)", "")
+            legacy_globs = [g.strip() for g in raw.split(",") if g.strip()]
+        print("Remember: once you migrate a zone (retroactive spec + tests), remove it from this list.")
+
+    # 8) write config
+    pipeline = ["spec", "compile", "plan", "tdd", "it", "audit"]
+    # 'features' is the root holding one directory per feature; the filenames
+    # inside each (spec.md / spec.yml / plan.md) are fixed, not configurable —
+    # feature discovery works by globbing, which varying filenames would break.
+    paths = {
+        "features": specs_dir,
+        "wiki": f"{specs_dir}/wiki",
+        "state": ".kivax/state.yml",
+        "lock": ".kivax/traceability.lock.json",
+    }
+    gates = {
+        "spec": "human", "compile": "human", "plan": "human",
+        "tdd": "auto", "it": "auto", "audit": "human", "evolve": "human",
+    }
+    if include_constitution_architecture:
+        pipeline = ["constitution", "architecture"] + pipeline
+        # Root-level, like README.md — whole-project artifacts, not per-feature.
+        paths["constitution"] = "CONSTITUTION.md"
+        paths["architecture"] = "ARCHITECTURE.md"
+        gates["constitution"] = "human"
+        gates["architecture"] = "human"
+
+    cfg = {
+        "version": 2,
+        "runtimes": runtimes,
+        "spec_language": spec_language,
+        # Whether this project started from no meaningful existing code —
+        # the kivax-architecture skill uses this to decide whether to author
+        # ARCHITECTURE.md from the intended stack or reverse-engineer it from
+        # the codebase. Re-derive by hand if you ever need to flip it.
+        "greenfield": greenfield,
+        # Phase sequence — data, not code. Add/remove/reorder phases here
+        # (custom ones too: add a kivax-<phase> skill to your active
+        # runtime(s)' skills dir(s), and an agent file only for runtimes that
+        # support one — they're plain project files, edit them like anything
+        # else). 'spec' and 'compile' are mandatory; only 'constitution'
+        # and/or 'architecture' may precede them; 'done' is implicit and terminal.
+        "pipeline": pipeline,
+        "paths": paths,
+        "git": {"base_branch": base_branch, "branch_prefix": "kivax/"},
+        "legacy_globs": legacy_globs,
+        "gates": gates,
+        "stack": {"active": active, "profiles": stack_profiles},
+    }
+    kivax_dir.mkdir(exist_ok=True)
+    config_path.write_text(
+        "# Kivax project configuration. Generated by 'kivax init'; edit by hand anytime.\n"
+        + yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+
+    # 9) features root + initial state. No spec.md is written here: at init
+    # time no feature exists yet. The first one is created by
+    # 'kivax feature new <slug>', which is also what allocates its number.
+    (root / specs_dir).mkdir(parents=True, exist_ok=True)
+    (kivax_dir / "state.yml").write_text(
+        (TEMPLATES / "state.template.yml").read_text(encoding="utf-8"), encoding="utf-8")
+
+    # 10) copy runtime files (agents, skills, orchestrator, templates)
+    # as real, ordinary, git-committed files — no symlinks. Edit any of them
+    # directly (e.g. change model: in an agent's frontmatter); 'kivax upgrade'
+    # pulls in future updates without clobbering your edits, and 'kivax
+    # promote' pushes a local change back to the global store.
+    manifest = copy_all(root, runtimes)
+    save_manifest(root, manifest)
+
+    print(f"""
+== Installation complete ==
+  Config:        .kivax/config.yml
+  Features:      {specs_dir}/  (one directory per feature; content language: {spec_language})
+  Runtime:       {', '.join(runtimes)} — copied into this project as real files
+  Pipeline:      {' -> '.join(pipeline)}
+
+Next step: open your assistant in this project and ask it to start a new feature (the 'kivax-new' skill).
+That creates {specs_dir}/01-<slug>/ with its own spec.md. You can also run 'kivax feature new <slug>' yourself.
+{"The first feature will start with the constitution and architecture phases, since CONSTITUTION.md/ARCHITECTURE.md don't exist yet." if include_constitution_architecture else ""}
+{"To migrate a legacy zone before touching it, ask your assistant to document the current behavior of <module> (the 'kivax-spec' skill)." if not greenfield else ""}
+""")
+    return 0
+
+
+# --------------------------------------------------------------------------- kivax feature
+# Feature lifecycle: allocating a number, creating the directory, seeding
+# spec.md, and choosing which feature the phase workflow drives. Deliberately
+# separate from 'kivax state', whose remit is phase and per-requirement status.
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def _lib():
+    """The lib modules, imported from the global store on demand."""
+    sys.path.insert(0, str(LIB))
+    import kivax_lib
+    import kivax_state
+    return kivax_lib, kivax_state
+
+
+def _next_feature_number(root: Path, cfg: dict, klib, kstate) -> str:
+    """Highest number seen anywhere + 1. Scanning the LOCK's id prefixes too is
+    what stops a number being reused after its directory was deleted — the same
+    principle as never reusing a removed requirement's id."""
+    used: set[int] = set()
+    for f in klib.list_features(root, cfg):
+        used.add(int(f.number))
+    st = kstate.load_state(root, cfg)
+    active = st.get("active") or {}
+    if active.get("number"):
+        used.add(int(active["number"]))
+    for n in (st.get("features") or {}):
+        try:
+            used.add(int(n))
+        except (TypeError, ValueError):
+            continue
+    lock = klib.load_lock(root, cfg)
+    for kind in ("requirements", "integration_scenarios"):
+        for rid in (lock.get(kind) or {}):
+            ff = klib.feature_number_of_id(rid)
+            if ff:
+                used.add(int(ff))
+    return f"{(max(used) + 1) if used else 1:02d}"
+
+
+def _feature_payload(root: Path, cfg: dict, klib, kstate, feature) -> dict:
+    st = kstate.load_state(root, cfg)
+    active = st.get("active") or {}
+    if str(active.get("number")) == feature.number:
+        phase = active.get("phase", "")
+    else:
+        phase = ((st.get("features") or {}).get(feature.number) or {}).get("phase", "")
+    def rel(p: Path) -> str:
+        # POSIX form: this is an API the agents consume, and it must read the
+        # same on every platform.
+        return p.relative_to(root).as_posix()
+
+    return {
+        "number": feature.number, "slug": feature.slug, "name": feature.name,
+        "dir": rel(feature.dir), "spec_md": rel(feature.spec_md),
+        "spec_yml": rel(feature.spec_yml), "plan": rel(feature.plan),
+        "phase": phase,
+        "active": str(active.get("number")) == feature.number,
+        "compiled": feature.spec_yml.is_file(),
+    }
+
+
+def cmd_feature(argv: list[str]) -> int:
+    require_kivax_home()
+    root, cfg = require_project()
+    klib, kstate = _lib()
+    sub = argv[0] if argv else ""
+    rest = argv[1:]
+
+    if sub == "new":
+        if not rest or rest[0].startswith("-"):
+            sys.exit("Usage: kivax feature new <slug>   (kebab-case, e.g. cancel-booking)")
+        slug = rest[0].strip().strip("/")
+        if not SLUG_RE.match(slug):
+            sys.exit(f"ERROR: '{slug}' isn't a valid slug. Use kebab-case: lowercase "
+                     f"letters, digits and hyphens, starting with a letter or digit.")
+        st = kstate.load_state(root, cfg)
+        active = st.get("active") or {}
+        if active.get("number") and active.get("phase") != "done" and "--force" not in rest:
+            sys.exit(f"ERROR: feature {active['number']}-{active.get('slug', '')} is still "
+                     f"in progress (phase: {active.get('phase')}). Kivax drives one feature "
+                     f"at a time per branch.\nFinish it, or pass --force to archive it as-is "
+                     f"and start the new one anyway.")
+        if any(f.slug == slug for f in klib.list_features(root, cfg)):
+            sys.exit(f"ERROR: a feature with slug '{slug}' already exists.")
+
+        number = _next_feature_number(root, cfg, klib, kstate)
+        fdir = klib.features_root(root, cfg) / f"{number}-{slug}"
+        fdir.mkdir(parents=True, exist_ok=True)
+        spec_md = fdir / "spec.md"
+        if not spec_md.is_file():
+            body = (TEMPLATES / "spec.template.md").read_text(encoding="utf-8")
+            spec_md.write_text(body.replace("FF", number), encoding="utf-8")
+
+        first_phase = klib.pipeline_of(cfg)[0]
+        archived = kstate.archive_active(st)
+        kstate.make_active(st, number, slug, first_phase)
+        kstate.save_state(root, cfg, st)
+        if archived:
+            print(f"Archived feature {archived} (it stays in state.yml and on disk).")
+        print(f"Feature {number}-{slug} created.\n"
+              f"  spec.md: {spec_md.relative_to(root)}\n"
+              f"  phase:   {first_phase}\n"
+              f"  ids:     REQ-{number}-001, REQ-{number}-002, ... (IT-{number}-NNN "
+              f"for integration scenarios)")
+        return 0
+
+    if sub == "list":
+        features = klib.list_features(root, cfg)
+        if not features:
+            print("No features yet. Create one with 'kivax feature new <slug>'.")
+            return 0
+        lock = klib.load_lock(root, cfg)
+        st = kstate.load_state(root, cfg)
+        active_num = str((st.get("active") or {}).get("number") or "")
+        for f in features:
+            payload = _feature_payload(root, cfg, klib, kstate, f)
+            if not f.spec_yml.is_file():
+                detail = "not compiled yet"
+            else:
+                spec = yaml.safe_load(f.spec_yml.read_text(encoding="utf-8")) or {}
+                hashes = klib.spec_hashes(spec)
+                n = sum(len(t) for t in hashes.values())
+                stale = sum(1 for kind, table in hashes.items()
+                            for rid, h in table.items()
+                            if (lock.get(kind, {}).get(rid) or {}).get("hash") not in (None, h))
+                detail = f"{n} ids" + (f", {stale} STALE vs lock" if stale else "")
+            mark = "*" if f.number == active_num else " "
+            print(f"{mark} {f.name:<28} phase={payload['phase'] or '-':<14} {detail}")
+        print("\n* = active feature (the one the phase workflow drives)")
+        return 0
+
+    if sub == "show":
+        number = None
+        if "--feature" in rest:
+            number = rest[rest.index("--feature") + 1]
+        feature = (klib.feature_by_number(root, cfg, number) if number
+                   else klib.active_feature(root, cfg))
+        if feature is None:
+            msg = ("no active feature — start one with 'kivax feature new <slug>' "
+                   "or resume one with 'kivax feature switch <NN>'")
+            if "--json" in rest:
+                print(json.dumps({"error": msg}, indent=2))
+                return 1
+            sys.exit(f"ERROR: {msg}")
+        payload = _feature_payload(root, cfg, klib, kstate, feature)
+        if "--json" in rest:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            for k, v in payload.items():
+                print(f"{k}: {v}")
+        return 0
+
+    if sub == "switch":
+        if not rest or rest[0].startswith("-"):
+            sys.exit("Usage: kivax feature switch <NN> [--force]")
+        feature = klib.feature_by_number(root, cfg, rest[0])
+        st = kstate.load_state(root, cfg)
+        active = st.get("active") or {}
+        if str(active.get("number")) == feature.number:
+            print(f"Feature {feature.name} is already active.")
+            return 0
+        if active.get("number") and active.get("phase") != "done" and "--force" not in rest:
+            sys.exit(f"ERROR: feature {active['number']}-{active.get('slug', '')} is still "
+                     f"in progress (phase: {active.get('phase')}). Switching now would "
+                     f"leave it mid-flow.\nFinish it, or pass --force.")
+        kstate.archive_active(st)
+        kstate.restore_active(st, feature.number, feature.slug, klib.pipeline_of(cfg)[0])
+        kstate.save_state(root, cfg, st)
+        print(f"Active feature: {feature.name} (phase: {st['active']['phase']})")
+        return 0
+
+    print("Usage: kivax feature <new|list|show|switch> [args]\n"
+          "  new <slug>              allocate a number, create the directory, seed spec.md\n"
+          "  list                    every feature with its phase and staleness\n"
+          "  show [--feature NN] [--json]\n"
+          "                          resolved paths for the active (or given) feature\n"
+          "  switch <NN> [--force]   make an existing feature the active one")
+    return 1
+
+
+# --------------------------------------------------------------------------- kivax upgrade
+def cmd_upgrade(argv: list[str]) -> int:
+    require_kivax_home()
+    root, cfg = require_project()
+    runtimes = cfg.get("runtimes", ["claude", "opencode"])
+    dry_run = "--dry-run" in argv
+
+    manifest = load_manifest(root)
+    updated, added, conflicts, unchanged = [], [], [], []
+
+    for rel, source in sync_pairs(runtimes):
+        dest = root / rel
+        h_up = file_hash(source)
+        h_synced = manifest.get(str(rel))
+
+        if not dest.is_file():
+            added.append(rel)
+            if not dry_run:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(source.read_bytes())
+                manifest[str(rel)] = h_up
+            continue
+
+        h_proj = file_hash(dest)
+
+        if h_synced is None:
+            # Untracked (manifest missing/stale). If it happens to already
+            # match upstream, just start tracking it; otherwise leave it
+            # alone rather than guess.
+            if h_proj == h_up:
+                unchanged.append(rel)
+                if not dry_run:
+                    manifest[str(rel)] = h_up
+            else:
+                conflicts.append((rel, "untracked and differs from upstream — not touched"))
+            continue
+
+        if h_up == h_synced:
+            unchanged.append(rel)
+            continue
+
+        # Upstream changed since our last sync.
+        if h_proj == h_synced:
+            # You never touched it: safe to update.
+            updated.append(rel)
+            if not dry_run:
+                dest.write_bytes(source.read_bytes())
+                manifest[str(rel)] = h_up
+        else:
+            # Both you AND upstream changed it: don't clobber your edits.
+            conflicts.append((rel, "you customized it AND upstream changed it"))
+            if not dry_run:
+                sidecar = dest.with_suffix(dest.suffix + ".upstream")
+                sidecar.write_bytes(source.read_bytes())
+
+    if not dry_run:
+        save_manifest(root, manifest)
+
+    print(f"{'Would update' if dry_run else 'Updated'}: {len(updated)}"
+          + (f" — {', '.join(str(p) for p in updated)}" if updated else ""))
+    print(f"{'Would add' if dry_run else 'Added'}: {len(added)}"
+          + (f" — {', '.join(str(p) for p in added)}" if added else ""))
+    print(f"Unchanged: {len(unchanged)}")
+    if conflicts:
+        print(f"\nCONFLICTS ({len(conflicts)}) — needs your attention:")
+        for rel, why in conflicts:
+            extra = "" if dry_run else f"  (upstream version saved as {rel}.upstream)"
+            print(f"  - {rel}: {why}{extra}")
+        print("\nCompare each file against its .upstream sibling and merge by hand, "
+              "then delete the .upstream file.")
+
+    # 'kivax upgrade' deliberately never rewrites config.yml, so a project can
+    # keep tag regexes that predate the per-feature id form. Nothing would
+    # fail — new requirements would just silently read as uncovered — so say so
+    # here, where the user is already looking at what changed.
+    for warning in _check_tag_regexes(cfg):
+        print(f"\nWARNING: {warning}\n(edit .kivax/config.yml — upgrade never "
+              f"rewrites it for you)")
+
+    if dry_run:
+        print("\n(--dry-run: nothing was written)")
+    return 1 if conflicts else 0
+
+
+# --------------------------------------------------------------------------- kivax promote
+# Two kinds: 'agent' (specialist personas, only for runtimes with real
+# subagent delegation) and 'skill' (everything else, including the
+# phase-driver workflows — one shared upstream dir, reused by every runtime).
+KIND_DIRS = {
+    "agent": {"claude": Path(".claude/agents"), "opencode": Path(".opencode/agent"),
+              "cursor": Path(".cursor/agents"), "copilot-cli": Path(".github/agents")},
+    "skill": {"claude": Path(".claude/skills"), "opencode": Path(".opencode/skills"),
+              "cursor": Path(".cursor/skills"), "codex": Path(".codex/skills"),
+              "vscode-copilot": Path(".github/skills"), "copilot-cli": Path(".github/skills")},
+}
+# Only 'skill' has a real per-runtime upstream file to compare against —
+# 'agent' doesn't: its upstream is the single canonical source in
+# AGENTS_SRC, handled separately in _promote_agent() below, since a promoted
+# agent edit has to be reverse-mapped (extract description/body/tools/model
+# from whichever runtime-specific shape the human edited), not byte-copied.
+KIND_UPSTREAM = {
+    "skill": {"claude": RUNTIME / "skills", "opencode": RUNTIME / "skills",
+              "cursor": RUNTIME / "skills", "codex": RUNTIME / "skills",
+              "vscode-copilot": RUNTIME / "skills", "copilot-cli": RUNTIME / "skills"},
+}
+
+
+def _kind_filename(kind: str, runtime: str, name: str) -> str:
+    """Project-relative filename (within KIND_DIRS[kind][runtime]) for a
+    promoted item. Only copilot-cli's agent profiles use a '.agent.md'
+    suffix; every other agent is plain '.md', and skills are always a
+    SKILL.md inside a same-named directory."""
+    if kind == "skill":
+        return f"{name}/SKILL.md"
+    if kind == "agent" and runtime == "copilot-cli":
+        return f"{name}.agent.md"
+    return f"{name}.md"
+
+
+# Only these two runtimes render 'tools:' as the exact canonical CSV
+# (cursor's 'readonly' bool and opencode's deny-map are lossy in the other
+# direction — promoting from those leaves the canonical tools list alone).
+AGENT_TOOLS_PASSTHROUGH_RUNTIMES = {"claude", "copilot-cli"}
+
+
+def _promote_agent(root: Path, name: str, runtime: str, model_only: bool) -> tuple[Path, bool, bool] | None:
+    """Extracts the generic parts (description, body, and — only from
+    runtimes whose format allows it — tools/model) from the project's
+    runtime-specific agent file, and folds them into the single canonical
+    source. Returns (canonical_path, was_new, was_unchanged), or None if
+    there was nothing to promote."""
+    sys.path.insert(0, str(LIB))
+    import kivax_agents
+
+    proj_file = root / KIND_DIRS["agent"][runtime] / _kind_filename("agent", runtime, name)
+    if not proj_file.is_file():
+        print(f"WARNING: {proj_file} doesn't exist in this project; skipping {runtime}")
+        return None
+
+    fm, body = kivax_agents.split_frontmatter(proj_file.read_text(encoding="utf-8"))
+    canonical_path = AGENTS_SRC / f"{name}.md"
+
+    if model_only:
+        model = fm.get("model")
+        if not model:
+            print(f"WARNING: {proj_file} has no model: field; nothing to promote for {runtime}")
+            return None
+        new_text = kivax_agents.update_canonical(canonical_path, model=model)
+    else:
+        kwargs = {"description": fm.get("description"), "body": body}
+        if runtime in AGENT_TOOLS_PASSTHROUGH_RUNTIMES and "tools" in fm:
+            kwargs["tools"] = fm["tools"]
+        elif runtime not in AGENT_TOOLS_PASSTHROUGH_RUNTIMES:
+            print(f"NOTE: {runtime}'s agent format doesn't carry the exact tools list; "
+                  f"the canonical tools: field is left untouched (promote from claude or "
+                  f"copilot-cli to change it, or edit {canonical_path} directly).")
+        if "model" in fm:
+            kwargs["model"] = fm["model"]
+        new_text = kivax_agents.update_canonical(canonical_path, **kwargs)
+
+    was_new = not canonical_path.is_file()
+    was_unchanged = (not was_new) and canonical_path.read_text(encoding="utf-8") == new_text
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.write_text(new_text, encoding="utf-8")
+    return canonical_path, was_new, was_unchanged
+
+
+def cmd_promote(argv: list[str]) -> int:
+    require_kivax_home()
+    root, cfg = require_project()
+    if len(argv) < 2:
+        sys.exit("Usage: kivax promote <agent|skill> <name> [--model-only] "
+                 "[--runtime claude|opencode|cursor|vscode-copilot|copilot-cli|codex]")
+    kind, name = argv[0], argv[1]
+    if kind not in KIND_DIRS:
+        sys.exit(f"Unknown kind '{kind}'. Use one of: {', '.join(KIND_DIRS)}")
+    model_only = "--model-only" in argv
+    if model_only and kind != "agent":
+        sys.exit("--model-only only applies to agents (skills have no model: field)")
+    only_runtime = None
+    if "--runtime" in argv:
+        only_runtime = argv[argv.index("--runtime") + 1]
+
+    project_runtimes = cfg.get("runtimes", ["claude", "opencode"])
+    runtimes = [only_runtime] if only_runtime else project_runtimes
+    manifest = load_manifest(root)
+    promoted = []
+
+    for runtime in runtimes:
+        if runtime not in project_runtimes:
+            print(f"WARNING: '{runtime}' isn't an active runtime for this project; skipping")
+            continue
+
+        if kind == "agent":
+            result = _promote_agent(root, name, runtime, model_only)
+            if result is None:
+                continue
+            upstream_file, was_new, was_unchanged = result
+            # The canonical source changed; regenerate so the manifest hash
+            # below reflects this runtime's freshly re-rendered file, not a
+            # stale one — otherwise 'kivax upgrade' would misreport a conflict.
+            regenerate_agents()
+            proj_file = root / KIND_DIRS[kind][runtime] / _kind_filename(kind, runtime, name)
+            if not model_only:
+                rendered = AGENT_CACHE / runtime / _kind_filename(kind, runtime, name)
+                manifest[proj_file.relative_to(root).as_posix()] = file_hash(rendered)
+            promoted.append((runtime, upstream_file, was_new, was_unchanged))
+            continue
+
+        proj_file = root / KIND_DIRS[kind][runtime] / _kind_filename(kind, runtime, name)
+        if not proj_file.is_file():
+            print(f"WARNING: {proj_file} doesn't exist in this project; skipping {runtime}")
+            continue
+        upstream_dir = KIND_UPSTREAM[kind][runtime]
+        upstream_file = upstream_dir / _kind_filename(kind, runtime, name)
+        upstream_file.parent.mkdir(parents=True, exist_ok=True)
+        new_upstream_text = proj_file.read_text(encoding="utf-8")
+
+        was_new = not upstream_file.is_file()
+        was_unchanged = (not was_new) and upstream_file.read_text(encoding="utf-8") == new_upstream_text
+        upstream_file.write_text(new_upstream_text, encoding="utf-8")
+
+        # Keep this project's own manifest consistent: upstream now equals
+        # what's tracked, so a future 'kivax upgrade' here sees no conflict.
+        manifest[proj_file.relative_to(root).as_posix()] = file_hash(upstream_file)
+
+        promoted.append((runtime, upstream_file, was_new, was_unchanged))
+
+    if not promoted:
+        print("Nothing promoted.")
+        return 1
+
+    save_manifest(root, manifest)
+    print(f"Promoted {kind} '{name}'"
+          + (" (model only)" if model_only else "") + ":")
+    for runtime, upstream_file, was_new, was_unchanged in promoted:
+        tag = "NEW upstream file" if was_new else ("unchanged, already up to date" if was_unchanged else "updated")
+        print(f"  - {runtime}: {upstream_file} ({tag})")
+    print("\nThis is now the default in the global store for NEW projects. Existing "
+          "projects won't pick it up automatically — run 'kivax upgrade' in each one "
+          "you want to update.")
+    return 0
+
+
+# --------------------------------------------------------------------------- kivax doctor
+def _looks_like_botched_feature(d: Path) -> bool:
+    """Whether a directory under paths.features that Kivax doesn't recognize is
+    worth complaining about.
+
+    A project may deliberately keep its own documentation under the same root —
+    a pre-existing corpus of spec documents, say — and nagging about those on
+    every run just teaches people to ignore `kivax doctor`. So only flag the
+    case that is actually a mistake: a directory that was *meant* to be a
+    feature, betrayed either by a leading digit (a mistyped number, `1-booking`
+    or `01_booking`) or by carrying the spec files a feature would hold."""
+    if d.name[:1].isdigit():
+        return True
+    return (d / "spec.md").is_file() or (d / "spec.yml").is_file()
+
+
+def _check_features(root: Path, cfg: dict) -> list[str]:
+    """Feature-layout and id invariants. These are the things that fail
+    silently — a wrong answer rather than a crash — if nobody checks them."""
+    problems: list[str] = []
+    try:
+        klib, kstate = _lib()
+    except ImportError as e:  # pragma: no cover - broken store
+        return [f"can't import the Kivax lib from {LIB}: {e}"]
+
+    paths = cfg.get("paths", {}) or {}
+    if "features" not in paths:
+        return problems  # already reported as a missing required key
+    base = root / paths["features"]
+    if not base.is_dir():
+        return [f"paths.features points at '{paths['features']}', which doesn't exist"]
+
+    wiki_rel = str(paths.get("wiki", "")).rstrip("/")
+    for d in sorted(base.iterdir()):
+        if not d.is_dir() or klib.FEATURE_DIR_RE.match(d.name):
+            continue
+        if d.relative_to(root).as_posix() == wiki_rel:
+            continue
+        if not _looks_like_botched_feature(d):
+            continue  # somebody's own documentation, deliberately co-located
+        problems.append(f"{d.relative_to(root)}/ looks like a feature directory Kivax "
+                        f"can't read: the name must be NN-slug (two or more digits, a "
+                        f"hyphen, then lowercase words) — e.g. 01-booking. As it stands "
+                        f"it is invisible to validate, trace, and hash")
+
+    features = klib.list_features(root, cfg)
+    by_number: dict[str, list[str]] = {}
+    for f in features:
+        by_number.setdefault(f.number, []).append(f.name)
+    for number, names in sorted(by_number.items()):
+        if len(names) > 1:
+            problems.append(f"duplicate feature number {number}: {', '.join(names)} — "
+                            f"their ids would collide. Renumber the one that hasn't "
+                            f"been merged yet (its tests aren't on the base branch, so "
+                            f"rewriting its tags is still local and safe)")
+
+    # Ids: unique project-wide, and each one's prefix must match its directory.
+    seen: dict[str, str] = {}
+    for feature in features:
+        if not feature.spec_yml.is_file():
+            continue
+        try:
+            spec = yaml.safe_load(feature.spec_yml.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as e:
+            problems.append(f"{feature.spec_yml.relative_to(root)} is not valid yml: {e}")
+            continue
+        for item in ((spec.get("requirements") or []) +
+                     (spec.get("integration_scenarios") or [])):
+            rid = item.get("id", "")
+            if not rid:
+                continue
+            if rid in seen:
+                problems.append(f"id '{rid}' is declared by both {seen[rid]} and "
+                                f"{feature.name} — a test tagged '{rid}' would be ambiguous")
+            seen[rid] = feature.name
+            ff = klib.feature_number_of_id(rid)
+            if ff is not None and ff != feature.number:
+                problems.append(f"id '{rid}' lives in {feature.name} but carries feature "
+                                f"number '{ff}'")
+
+    # Lock entries whose feature no longer has a directory.
+    numbers = {f.number for f in features}
+    lock = klib.load_lock(root, cfg)
+    stranded = sorted({rid for kind in ("requirements", "integration_scenarios")
+                       for rid in (lock.get(kind) or {})
+                       if (klib.feature_number_of_id(rid) or "") not in numbers
+                       and klib.feature_number_of_id(rid)})
+    if stranded:
+        problems.append(f"the traceability lock holds ids whose feature directory is "
+                        f"gone: {', '.join(stranded[:6])}"
+                        f"{'...' if len(stranded) > 6 else ''}")
+
+    # The highest-value check: id_tag_regexes live in THIS file and 'kivax
+    # upgrade' never rewrites config.yml, so a project can silently keep
+    # regexes that only match the old flat form. New REQ-FF-NNN tags would then
+    # be invisible to the scan and every new requirement would read as
+    # uncovered — a wrong answer, not an error.
+    problems += _check_tag_regexes(cfg)
+
+    # The active feature must resolve to a real directory.
+    st = kstate.load_state(root, cfg)
+    active = (st.get("active") or {})
+    if active.get("number") and str(active["number"]) not in numbers:
+        problems.append(f"state.yml's active feature is '{active['number']}-"
+                        f"{active.get('slug', '')}' but no such directory exists under "
+                        f"paths.features")
+    return problems
+
+
+def _check_tag_regexes(cfg: dict) -> list[str]:
+    problems: list[str] = []
+    stack = cfg.get("stack", {}) or {}
+    profiles = stack.get("profiles", {}) or {}
+    active = stack.get("active")
+    names = [active] if isinstance(active, str) else list(active or [])
+    for name in names:
+        prof = profiles.get(name) or {}
+        for rx in prof.get("id_tag_regexes", []) or []:
+            try:
+                compiled = re.compile(rx)
+            except re.error as e:
+                problems.append(f"profile '{name}': id_tag_regexes entry {rx!r} is not a "
+                                f"valid regex ({e})")
+                continue
+            # A synthetic tag in each stack's own syntax isn't worth building;
+            # testing the id fragment against a prefixed id is enough to tell
+            # whether the pattern was updated for the per-feature form.
+            if not re.search(r"\(\?:\\d\{2,\}-\)\?", rx) and "REQ-01-001" not in rx:
+                probe = compiled.search('@Tag("REQ-01-001") REQ-01-001 [REQ-01-001] '
+                                        'kivax:REQ-01-001 mark.req("REQ-01-001")')
+                if probe is None:
+                    problems.append(
+                        f"profile '{name}': id_tag_regexes only match the old flat "
+                        f"REQ-NNN form, so tags like REQ-01-001 are invisible and every "
+                        f"new requirement will read as uncovered. Replace \\d{{3}} with "
+                        f"(?:\\d{{2,}}-)?\\d{{3}} in: {rx}")
+    return problems
+
+
+def cmd_doctor(argv: list[str]) -> int:
+    require_kivax_home()
+    root = Path.cwd()
+    problems = []
+    config_path = root / ".kivax" / "config.yml"
+    if not config_path.is_file():
+        print("NOT INSTALLED: .kivax/config.yml is missing in this project.")
+        return 1
+    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    required_path_keys = ["features", "wiki", "state", "lock"]
+    # Only required when the project actually opted into these phases —
+    # opted-out configs shouldn't get a spurious error.
+    configured_pipeline = cfg.get("pipeline") or []
+    for phase in ("constitution", "architecture"):
+        if phase in configured_pipeline:
+            required_path_keys.append(phase)
+    for key in required_path_keys:
+        if key not in cfg.get("paths", {}):
+            problems.append(f"missing paths.{key} in config.yml")
+    for gone in ("spec_md", "spec_yml", "plan"):
+        if gone in cfg.get("paths", {}):
+            problems.append(
+                f"paths.{gone} is from the single-spec layout Kivax no longer uses. "
+                f"Kivax now keeps one spec per feature under paths.features "
+                f"(e.g. specs/01-booking/spec.yml) — remove paths.{gone}")
+
+    sys.path.insert(0, str(LIB))
+    # The effective pipeline (falls back to the default when 'pipeline' is
+    # unset) — used below to check that every phase actually has a skill.
+    effective_pipeline: list[str] = []
+    try:
+        from kivax_lib import pipeline_of
+        effective_pipeline = pipeline_of(cfg)
+    except SystemExit as e:
+        problems.append(str(e))
+
+    runtimes = cfg.get("runtimes", [])
+    dir_checks = {
+        "claude": [root / ".claude/agents", root / ".claude/skills"],
+        "opencode": [root / ".opencode/agent", root / ".opencode/skills"],
+        "cursor": [root / ".cursor/agents", root / ".cursor/skills"],
+        "vscode-copilot": [root / ".github/skills"],
+        "copilot-cli": [root / ".github/agents", root / ".github/skills"],
+        "codex": [root / ".codex/skills"],
+    }
+    file_checks = {
+        "claude": [root / "AGENTS.md"],
+        "opencode": [root / "AGENTS.md"],
+        "cursor": [root / "AGENTS.md"],
+        "vscode-copilot": [root / ".github/copilot-instructions.md"],
+        "copilot-cli": [root / "AGENTS.md"],
+        "codex": [root / "AGENTS.md"],
+    }
+    for runtime in runtimes:
+        for d in dir_checks.get(runtime, []):
+            if not d.is_dir() or not any(d.iterdir()):
+                problems.append(f"{d.relative_to(root)} is empty or missing "
+                                f"(missing 'kivax init'/'kivax upgrade'?)")
+        for c in file_checks.get(runtime, []):
+            if not c.is_file():
+                problems.append(f"{c.relative_to(root)} is missing")
+
+    # Every phase in the pipeline needs a kivax-<phase> skill in each active
+    # runtime's skills dir, or the flow dead-ends there at runtime. This is the
+    # usual way a custom phase breaks: added to 'pipeline', skill never written.
+    skills_dirs = {
+        "claude": Path(".claude/skills"), "opencode": Path(".opencode/skills"),
+        "cursor": Path(".cursor/skills"), "codex": Path(".codex/skills"),
+        "vscode-copilot": Path(".github/skills"), "copilot-cli": Path(".github/skills"),
+    }
+    checked: set[tuple[str, str]] = set()  # (skills_dir, phase) — copilot runtimes share a dir
+    for runtime in runtimes:
+        rel_dir = skills_dirs.get(runtime)
+        if rel_dir is None:
+            continue
+        for phase in effective_pipeline:
+            if (str(rel_dir), phase) in checked:
+                continue
+            checked.add((str(rel_dir), phase))
+            if not (root / rel_dir / f"kivax-{phase}" / "SKILL.md").is_file():
+                problems.append(f"{rel_dir}/kivax-{phase}/SKILL.md is missing, but "
+                                f"'{phase}' is in the pipeline (add the skill, or remove "
+                                f"the phase from 'pipeline' in .kivax/config.yml)")
+
+    gates_cfg = cfg.get("gates", {}) or {}
+    for phase, mode in gates_cfg.items():
+        if mode not in ("human", "auto"):
+            problems.append(f"gates.{phase} is '{mode}'; it must be 'human' or 'auto'")
+
+    problems += _check_features(root, cfg)
+
+    manifest = load_manifest(root)
+    if not manifest:
+        problems.append(".kivax/sync.json is missing — 'kivax upgrade' won't be able to "
+                        "tell your edits apart from upstream changes")
+
+    stale_upstream_files = list(root.rglob("*.upstream"))
+    if stale_upstream_files:
+        problems.append(f"{len(stale_upstream_files)} unresolved .upstream conflict file(s) "
+                        f"from a previous 'kivax upgrade' — resolve and delete them")
+
+    if problems:
+        print("PROBLEMS FOUND:")
+        for p in dict.fromkeys(problems):  # de-dupe (e.g. AGENTS.md checked by several runtimes)
+            print(f"  - {p}")
+        return 1
+    print("OK: project installation looks correct.")
+    return 0
+
+
+def cmd_version(argv: list[str]) -> int:
+    require_kivax_home()
+    v = KIVAX_HOME / "VERSION"
+    print(f"kivax store: {KIVAX_HOME}")
+    print(f"version: {v.read_text(encoding='utf-8').strip() if v.is_file() else 'unknown'}")
+    return 0
+
+
+def cmd_passthrough(name: str, argv: list[str]) -> int:
+    require_kivax_home()
+    script = LIB / f"kivax_{name}.py"
+    if not script.is_file():
+        sys.exit(f"ERROR: no script found for '{name}' in {LIB}")
+    os.execv(sys.executable, [sys.executable, str(script), *argv])
+
+
+def main() -> int:
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, rest = sys.argv[1], sys.argv[2:]
+    if cmd == "init":
+        return cmd_init(rest)
+    if cmd == "feature":
+        return cmd_feature(rest)
+    if cmd == "upgrade":
+        return cmd_upgrade(rest)
+    if cmd == "promote":
+        return cmd_promote(rest)
+    if cmd == "doctor":
+        return cmd_doctor(rest)
+    if cmd == "version":
+        return cmd_version(rest)
+    if cmd == "link":
+        sys.exit("'kivax link' isn't a command. Did you mean 'kivax upgrade'?")
+    if cmd in PASSTHROUGH:
+        return cmd_passthrough(cmd, rest)
+    print(f"Unknown command: {cmd}\n")
+    print(__doc__)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

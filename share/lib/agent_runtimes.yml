@@ -1,0 +1,52 @@
+# Declares, per runtime, the shape of the agent frontmatter to generate from
+# the canonical sources in agents/*.md (description + tools + optional model
+# override). Read by kivax_agents.py at install time ('kivax init'/'kivax
+# upgrade') to render the final per-runtime agent file — nothing here is
+# copied verbatim; it's a recipe, not content.
+#
+# Each field is [frontmatter_key, source]. 'source' is one of:
+#   field:<name>      verbatim value from the canonical frontmatter (or,
+#                     for 'name', the agent's filename stem)
+#   value:<literal>   a fixed constant, same for every agent on this runtime
+#   computed:<fn>     a genuinely derived value — see kivax_agents.py's
+#                     COMPUTED_FIELDS for what each one does
+#
+# Only runtimes with real subagent/context-isolation support appear here
+# (claude, opencode, cursor, copilot-cli) — codex and vscode-copilot have no
+# agent-file concept, so their specialists are inlined into the phase skills
+# instead (see share/runtime/skills/).
+
+claude:
+  dir: .claude/agents
+  filename: "{name}.md"
+  fields:
+    - [name, "field:name"]
+    - [description, "field:description"]
+    - [tools, "field:tools"]
+    - [model, "computed:model:inherit"]
+
+opencode:
+  dir: .opencode/agent
+  filename: "{name}.md"
+  fields:
+    - [description, "field:description"]
+    - [mode, "value:subagent"]
+    - [tools, "computed:opencode_tools"]
+
+cursor:
+  dir: .cursor/agents
+  filename: "{name}.md"
+  fields:
+    - [name, "field:name"]
+    - [description, "field:description"]
+    - [model, "computed:model:auto"]
+    - [readonly, "computed:readonly"]
+    - [is_background, "value:false"]
+
+copilot-cli:
+  dir: .github/agents
+  filename: "{name}.agent.md"
+  fields:
+    - [name, "field:name"]
+    - [description, "field:description"]
+    - [tools, "field:tools"]

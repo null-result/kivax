@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in Kivax behaves differently from what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The two most useful things you can give us
+        are the output of `kivax doctor` and the exact command that failed.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The commands you ran, in order.
+      placeholder: |
+        1. kivax init  (answers: ...)
+        2. kivax feature new checkout
+        3. kivax trace   -> unexpected output
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `kivax doctor`
+      description: Run it at the root of the affected project. Paste it as-is.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Kivax version
+      description: The output of `kivax version`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Linux, macOS, Windows]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Which assistant(s) were you using?
+      multiple: true
+      options:
+        - Claude Code
+        - opencode
+        - Cursor
+        - GitHub Copilot (VS Code)
+        - GitHub Copilot CLI
+        - OpenAI Codex CLI
+        - None / not relevant (CLI only)

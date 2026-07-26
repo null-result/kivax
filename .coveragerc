@@ -1,0 +1,19 @@
+[run]
+branch = True
+omit =
+    */tests/*
+    */__pycache__/*
+    */.venv/*
+    */venv/*
+
+[report]
+fail_under = 90
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    if __name__ == "__main__":
+
+[html]
+directory = htmlcov
