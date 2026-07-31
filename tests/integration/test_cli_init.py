@@ -23,7 +23,7 @@ def test_force_reinstalls(kivax_cli, project, repo_dir, call, feed_input):
     answers = [
         *BLANK6,            # runtimes
         "",                  # greenfield (heuristic default True)
-        "",                  # constitution/architecture (default yes)
+        "",                  # principles/architecture (default yes)
         "",                  # features root (existing 'specs/' is empty -> single ask)
         "",                  # spec_language
         "python-pytest",     # manual stack profile (greenfield -> nothing detected)
@@ -53,7 +53,7 @@ def test_non_greenfield_with_detected_stack_confirmed(kivax_cli, use_store, repo
     answers = [
         *BLANK6,
         "n",                 # not greenfield
-        "",                  # constitution/architecture
+        "",                  # principles/architecture
         "",                  # features root (no existing specs dir -> single ask)
         "",                  # spec_language
         "",                  # confirm the detected 'python-pytest' profile
@@ -100,14 +100,14 @@ def test_runtimes_all_declined_installs_every_runtime(kivax_cli, use_store, repo
     assert len(cfg["runtimes"]) == 6
 
 
-def test_constitution_and_architecture_declined(kivax_cli, use_store, repo_dir, call, feed_input):
+def test_principles_and_architecture_declined(kivax_cli, use_store, repo_dir, call, feed_input):
     answers = [*BLANK6, "y", "n", "", "", "python-pytest", ""]
     feed_input(*answers)
     rc = call(kivax_cli.main, "init")
     assert rc == 0
     cfg = yaml.safe_load((repo_dir / ".kivax/config.yml").read_text())
-    assert "constitution" not in cfg["pipeline"]
-    assert "constitution" not in cfg["paths"]
+    assert "principles" not in cfg["pipeline"]
+    assert "principles" not in cfg["paths"]
 
 
 def test_existing_specs_dir_used_as_is_when_it_is_the_kivax_layout(kivax_cli, use_store, repo_dir,
@@ -119,7 +119,7 @@ def test_existing_specs_dir_used_as_is_when_it_is_the_kivax_layout(kivax_cli, us
     answers = [
         *BLANK6,
         "n",                 # not greenfield
-        "",                  # constitution/architecture
+        "",                  # principles/architecture
         "",                  # confirm using 'specs' as the features root (no loose .md -> default yes)
         "",                  # spec_language
         "python-pytest",     # no stack markers under src/ -> manual entry
@@ -142,7 +142,7 @@ def test_existing_loose_corpus_declined_goes_to_separate_folder_and_legacy_globs
     answers = [
         *BLANK6,
         "n",                 # not greenfield
-        "",                  # constitution/architecture
+        "",                  # principles/architecture
         "n",                 # decline using 'specs' as the features root (loose .md present)
         "",                  # accept the suggested 'specs/features'
         "",                  # spec_language

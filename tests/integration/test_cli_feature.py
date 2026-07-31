@@ -18,7 +18,7 @@ def test_new_creates_feature_and_seeds_spec(kivax_cli, project, repo_dir, call, 
     assert "REQ-01-001" in spec_md.read_text()
     state = yaml.safe_load((repo_dir / ".kivax/state.yml").read_text())
     assert state["active"]["number"] == "01"
-    assert state["active"]["phase"] == "constitution"  # first pipeline phase
+    assert state["active"]["phase"] == "principles"  # first pipeline phase
 
 
 def test_new_rejects_bad_slug(kivax_cli, project, call):

@@ -168,7 +168,7 @@ def main() -> int:
                   "those entries from\nthe lock deliberately.")
             return 1
         p = save_lock(root, cfg, new_lock)
-        print(f"Lock updated: {p.relative_to(root)} "
+        print(f"Lock updated: {p.relative_to(root).as_posix()} "
               f"({sum(len(v) for v in new_lock.values())} ids across "
               f"{sum(1 for _f, s in pairs if s is not None)} feature(s))")
 

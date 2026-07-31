@@ -23,7 +23,11 @@ Usage:
                              becomes the default for future projects.
   kivax doctor               Diagnose the current project's installation.
   kivax version               Version of the installed global store.
-  kivax validate|hash|trace|state|wiki|specfirst [args...]
+  kivax task <add|list|set|next|clear> [args]
+                             Per-agent task lists for the active feature, so an
+                             interrupted session resumes mid-agent instead of
+                             redoing the phase. 'list' shows the resume point.
+  kivax validate|hash|trace|state|task|wiki|specfirst [args...]
                               Passes control to the matching script.
 
 KIVAX_HOME (default ~/.kivax) must point to the global store created by
@@ -81,7 +85,7 @@ def regenerate_agents() -> None:
         AGENT_CACHE_BODY.parent.mkdir(parents=True, exist_ok=True)
         AGENT_CACHE_BODY.write_text(body.lstrip("\n"), encoding="utf-8")
 
-PASSTHROUGH = {"validate", "hash", "trace", "state", "wiki", "specfirst"}
+PASSTHROUGH = {"validate", "hash", "trace", "state", "task", "wiki", "specfirst"}
 
 # (key, human label, default answer) — key is what ends up in .kivax/config.yml's
 # 'runtimes' list and every runtime-keyed dict in this file. 'vscode-copilot' and
@@ -260,7 +264,7 @@ def sync_pairs(runtimes: list[str]) -> list[tuple[Path, Path]]:
     if {"claude", "opencode", "cursor", "copilot-cli", "codex"} & runtimes_set:
         pairs.append((Path("AGENTS.md"), AGENT_CACHE_BODY))
 
-    # Skills: 4 shared reference skills + 13 phase-driver skills, copied
+    # Skills: 5 shared reference skills + 13 phase-driver skills, copied
     # unchanged into every active runtime's own skills directory.
     skill_dest_dirs: list[Path] = []
     if "claude" in runtimes:
@@ -290,18 +294,25 @@ def copy_all(root: Path, runtimes: list[str]) -> dict[str, str]:
         dest = root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(source.read_bytes())
-        manifest[str(rel)] = file_hash(source)
+        manifest[rel.as_posix()] = file_hash(source)
     return manifest
 
 
 def load_manifest(root: Path) -> dict[str, str]:
+    """Keys are always read as POSIX paths. Manifests written by a pre-fix
+    Windows install used '\\' (str(Path) is OS-dependent), which made a
+    sync.json committed from Windows match nothing on a teammate's Linux
+    checkout — every managed file read as untracked. Normalizing on load
+    repairs those in place on the next 'kivax upgrade', with no migration
+    step for the user."""
     p = root / ".kivax" / "sync.json"
     if p.is_file():
         import json
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            raw = json.loads(p.read_text(encoding="utf-8"))
         except (ValueError, OSError):
             return {}
+        return {str(k).replace("\\", "/"): v for k, v in raw.items()}
     return {}
 
 
@@ -346,8 +357,8 @@ def cmd_init(argv: list[str]) -> int:
     greenfield = ask_yesno("Is this a greenfield project (no meaningful existing code)?",
                            heuristic_greenfield)
 
-    include_constitution_architecture = ask_yesno(
-        "\nInclude the constitution and architecture phases? (a one-time CONSTITUTION.md "
+    include_principles_architecture = ask_yesno(
+        "\nInclude the principles and architecture phases? (a one-time PRINCIPLES.md "
         "with the project's non-negotiable principles, and an ARCHITECTURE.md kept current "
         "as the project evolves — recommended)", True)
 
@@ -370,7 +381,7 @@ def cmd_init(argv: list[str]) -> int:
                   f"create its\nper-feature directories alongside them. A separate "
                   f"folder is usually cleaner.")
         if ask_yesno(f"Use '{rel}' as the features root anyway?", not loose):
-            specs_dir = str(rel)
+            specs_dir = rel.as_posix()
         else:
             specs_dir = ask("Where should the features root be?", "specs/features"
                             if loose else "specs")
@@ -469,12 +480,12 @@ def cmd_init(argv: list[str]) -> int:
         "spec": "human", "compile": "human", "plan": "human",
         "tdd": "auto", "it": "auto", "audit": "human", "evolve": "human",
     }
-    if include_constitution_architecture:
-        pipeline = ["constitution", "architecture"] + pipeline
+    if include_principles_architecture:
+        pipeline = ["principles", "architecture"] + pipeline
         # Root-level, like README.md — whole-project artifacts, not per-feature.
-        paths["constitution"] = "CONSTITUTION.md"
+        paths["principles"] = "PRINCIPLES.md"
         paths["architecture"] = "ARCHITECTURE.md"
-        gates["constitution"] = "human"
+        gates["principles"] = "human"
         gates["architecture"] = "human"
 
     cfg = {
@@ -490,7 +501,7 @@ def cmd_init(argv: list[str]) -> int:
         # (custom ones too: add a kivax-<phase> skill to your active
         # runtime(s)' skills dir(s), and an agent file only for runtimes that
         # support one — they're plain project files, edit them like anything
-        # else). 'spec' and 'compile' are mandatory; only 'constitution'
+        # else). 'spec' and 'compile' are mandatory; only 'principles'
         # and/or 'architecture' may precede them; 'done' is implicit and terminal.
         "pipeline": pipeline,
         "paths": paths,
@@ -529,7 +540,7 @@ def cmd_init(argv: list[str]) -> int:
 
 Next step: open your assistant in this project and ask it to start a new feature (the 'kivax-new' skill).
 That creates {specs_dir}/01-<slug>/ with its own spec.md. You can also run 'kivax feature new <slug>' yourself.
-{"The first feature will start with the constitution and architecture phases, since CONSTITUTION.md/ARCHITECTURE.md don't exist yet." if include_constitution_architecture else ""}
+{"The first feature will start with the principles and architecture phases, since PRINCIPLES.md/ARCHITECTURE.md don't exist yet." if include_principles_architecture else ""}
 {"To migrate a legacy zone before touching it, ask your assistant to document the current behavior of <module> (the 'kivax-spec' skill)." if not greenfield else ""}
 """)
     return 0
@@ -636,7 +647,7 @@ def cmd_feature(argv: list[str]) -> int:
         if archived:
             print(f"Archived feature {archived} (it stays in state.yml and on disk).")
         print(f"Feature {number}-{slug} created.\n"
-              f"  spec.md: {spec_md.relative_to(root)}\n"
+              f"  spec.md: {spec_md.relative_to(root).as_posix()}\n"
               f"  phase:   {first_phase}\n"
               f"  ids:     REQ-{number}-001, REQ-{number}-002, ... (IT-{number}-NNN "
               f"for integration scenarios)")
@@ -729,14 +740,14 @@ def cmd_upgrade(argv: list[str]) -> int:
     for rel, source in sync_pairs(runtimes):
         dest = root / rel
         h_up = file_hash(source)
-        h_synced = manifest.get(str(rel))
+        h_synced = manifest.get(rel.as_posix())
 
         if not dest.is_file():
             added.append(rel)
             if not dry_run:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(source.read_bytes())
-                manifest[str(rel)] = h_up
+                manifest[rel.as_posix()] = h_up
             continue
 
         h_proj = file_hash(dest)
@@ -748,7 +759,7 @@ def cmd_upgrade(argv: list[str]) -> int:
             if h_proj == h_up:
                 unchanged.append(rel)
                 if not dry_run:
-                    manifest[str(rel)] = h_up
+                    manifest[rel.as_posix()] = h_up
             else:
                 conflicts.append((rel, "untracked and differs from upstream — not touched"))
             continue
@@ -763,7 +774,7 @@ def cmd_upgrade(argv: list[str]) -> int:
             updated.append(rel)
             if not dry_run:
                 dest.write_bytes(source.read_bytes())
-                manifest[str(rel)] = h_up
+                manifest[rel.as_posix()] = h_up
         else:
             # Both you AND upstream changed it: don't clobber your edits.
             conflicts.append((rel, "you customized it AND upstream changed it"))
@@ -1000,7 +1011,7 @@ def _check_features(root: Path, cfg: dict) -> list[str]:
             continue
         if not _looks_like_botched_feature(d):
             continue  # somebody's own documentation, deliberately co-located
-        problems.append(f"{d.relative_to(root)}/ looks like a feature directory Kivax "
+        problems.append(f"{d.relative_to(root).as_posix()}/ looks like a feature directory Kivax "
                         f"can't read: the name must be NN-slug (two or more digits, a "
                         f"hyphen, then lowercase words) — e.g. 01-booking. As it stands "
                         f"it is invisible to validate, trace, and hash")
@@ -1024,7 +1035,7 @@ def _check_features(root: Path, cfg: dict) -> list[str]:
         try:
             spec = yaml.safe_load(feature.spec_yml.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as e:
-            problems.append(f"{feature.spec_yml.relative_to(root)} is not valid yml: {e}")
+            problems.append(f"{feature.spec_yml.relative_to(root).as_posix()} is not valid yml: {e}")
             continue
         for item in ((spec.get("requirements") or []) +
                      (spec.get("integration_scenarios") or [])):
@@ -1112,7 +1123,7 @@ def cmd_doctor(argv: list[str]) -> int:
     # Only required when the project actually opted into these phases —
     # opted-out configs shouldn't get a spurious error.
     configured_pipeline = cfg.get("pipeline") or []
-    for phase in ("constitution", "architecture"):
+    for phase in ("principles", "architecture"):
         if phase in configured_pipeline:
             required_path_keys.append(phase)
     for key in required_path_keys:
@@ -1155,11 +1166,11 @@ def cmd_doctor(argv: list[str]) -> int:
     for runtime in runtimes:
         for d in dir_checks.get(runtime, []):
             if not d.is_dir() or not any(d.iterdir()):
-                problems.append(f"{d.relative_to(root)} is empty or missing "
+                problems.append(f"{d.relative_to(root).as_posix()} is empty or missing "
                                 f"(missing 'kivax init'/'kivax upgrade'?)")
         for c in file_checks.get(runtime, []):
             if not c.is_file():
-                problems.append(f"{c.relative_to(root)} is missing")
+                problems.append(f"{c.relative_to(root).as_posix()} is missing")
 
     # Every phase in the pipeline needs a kivax-<phase> skill in each active
     # runtime's skills dir, or the flow dead-ends there at runtime. This is the
@@ -1179,7 +1190,7 @@ def cmd_doctor(argv: list[str]) -> int:
                 continue
             checked.add((str(rel_dir), phase))
             if not (root / rel_dir / f"kivax-{phase}" / "SKILL.md").is_file():
-                problems.append(f"{rel_dir}/kivax-{phase}/SKILL.md is missing, but "
+                problems.append(f"{rel_dir.as_posix()}/kivax-{phase}/SKILL.md is missing, but "
                                 f"'{phase}' is in the pipeline (add the skill, or remove "
                                 f"the phase from 'pipeline' in .kivax/config.yml)")
 

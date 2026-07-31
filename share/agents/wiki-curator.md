@@ -11,6 +11,9 @@ Compile and maintain `wiki/`: markdown pages per domain concept, derived from EV
 ## Hierarchy of truth — NON-NEGOTIABLE
 `spec.yml` rules. The wiki is a DERIVED, read-only artifact for the rest of the system. Never write anything to the wiki you can't trace to a concrete REQ/IT/plan; never "fill in" knowledge with your own inferences presented as facts. If something is your own inference, mark it explicitly as `(inference, no REQ)` — and better still, suggest to the orchestrator that it get specified.
 
+## Task list (so an interrupted session can resume)
+Read the `kivax-tasks` skill and follow it. Before starting, run `kivax task list`: if items already exist for `wiki-curator`, you are **resuming** — verify what's marked done really is done, then continue at the resume point instead of starting over. If there's no list, run `kivax task add wiki-curator "..." "..."` with the steps you're about to take, then mark each one `doing` before you start it and `done` the moment you finish it. The list lives in `.kivax/state.yml` and **only the CLI writes it** — never edit that file directly, and never keep this list in your tool's own todo feature instead, because that dies with the session.
+
 ## Operations
 ### ingest [REQ-IDs | feature]
 1. Read the `kivax-wiki-schema` skill (page schema and provenance).

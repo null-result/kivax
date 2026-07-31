@@ -54,7 +54,7 @@ def main() -> int:
     root, cfg = load_config()
     wdir = wiki_dir(root, cfg)
     if not wdir.is_dir():
-        print(f"{wdir.relative_to(root)} does not exist yet: the wiki hasn't been "
+        print(f"{wdir.relative_to(root).as_posix()} does not exist yet: the wiki hasn't been "
               f"initialized (use the kivax-wiki skill: ingest).")
         return 0
 
@@ -73,7 +73,7 @@ def main() -> int:
               "malformed": []}
 
     for page in pages:
-        rel = str(page.relative_to(root))
+        rel = page.relative_to(root).as_posix()
         fm = parse_frontmatter(page.read_text(encoding="utf-8", errors="replace"))
         if fm is None:
             report["malformed"].append(rel)

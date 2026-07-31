@@ -13,7 +13,9 @@ Usage:
   kivax state next        # prints the phase after the current one ('done' at the end)
 
 Features are created and switched with `kivax feature`, not here: this module
-owns phase and per-requirement status, not the feature lifecycle.
+owns phase and per-requirement status, not the feature lifecycle. It owns the
+SHAPE of the whole document, though — including the per-agent task lists that
+`kivax task` reads and writes, since archiving a feature has to carry them.
 
 Shape (version 2) — one ACTIVE feature (one per git branch), plus the archived
 records of features already worked on:
@@ -24,9 +26,10 @@ records of features already worked on:
       slug: cancel-booking
       phase: tdd
       requirements: {REQ-02-001: {status: green, updated_at: ...}}
+      tasks: {tdd: [{id: 1, agent: implementer, text: ..., status: doing}]}
       history: [...]
     features:
-      "01": {slug: booking, phase: done, requirements: {...}, history: [...]}
+      "01": {slug: booking, phase: done, requirements: {...}, tasks: {...}, history: [...]}
 
 `history` lives inside each feature record rather than at the top level on
 purpose: with one active feature per branch, every branch appends to this file,
@@ -40,9 +43,29 @@ import yaml
 from kivax_lib import TERMINAL_PHASE, active_feature, load_config, load_spec, path_of, pipeline_of
 
 REQ_STATES = ["pending", "red", "green", "invalidated"]
+# Task vocabulary lives here rather than in kivax_task because this module owns
+# the shape of the state document (it archives and restores tasks with their
+# feature). kivax_task imports these; the dependency only ever goes that way.
+TASK_STATES = ["todo", "doing", "done", "skipped"]
+OPEN_TASK_STATES = ("todo", "doing")
 
 
-def _now() -> str:
+def resume_point(items: list[dict]) -> dict | None:
+    """Where a fresh session picks up: whatever was in flight when the last one
+    stopped, or else the first thing not yet started. An item left `doing`
+    outranks a `todo` even if it sits later in the list — it's the one with
+    half-finished work behind it. One definition, so 'state show', 'task list',
+    and 'task next' can never disagree about where you left off."""
+    for t in items:
+        if t.get("status") == "doing":
+            return t
+    for t in items:
+        if t.get("status") == "todo":
+            return t
+    return None
+
+
+def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -76,7 +99,7 @@ def log(state: dict, msg: str) -> None:
     active = state.get("active")
     if not active:
         return
-    active.setdefault("history", []).append({"at": _now(), "event": msg})
+    active.setdefault("history", []).append({"at": now(), "event": msg})
 
 
 def require_active(state: dict) -> dict:
@@ -101,6 +124,7 @@ def archive_active(state: dict) -> str | None:
         "slug": active.get("slug", ""),
         "phase": active.get("phase", ""),
         "requirements": active.get("requirements", {}) or {},
+        "tasks": active.get("tasks", {}) or {},
         "history": active.get("history", []) or [],
     }
     state["active"] = None
@@ -110,7 +134,7 @@ def archive_active(state: dict) -> str | None:
 def make_active(state: dict, number: str, slug: str, phase: str) -> None:
     """Starts a brand-new feature as the active one."""
     state["active"] = {"number": str(number), "slug": slug, "phase": phase,
-                       "requirements": {}, "history": []}
+                       "requirements": {}, "tasks": {}, "history": []}
     log(state, f"init feature {number}-{slug} (phase: {phase})")
 
 
@@ -123,6 +147,7 @@ def restore_active(state: dict, number: str, slug: str, fallback_phase: str) -> 
         "slug": prev.get("slug") or slug,
         "phase": prev.get("phase") or fallback_phase,
         "requirements": prev.get("requirements", {}) or {},
+        "tasks": prev.get("tasks", {}) or {},
         "history": prev.get("history", []) or [],
     }
     log(state, f"switched to feature {number}-{slug}")
@@ -167,6 +192,15 @@ def main() -> int:
             counts[info.get("status", "?")] = counts.get(info.get("status", "?"), 0) + 1
         print("Requirements:", ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
               or "no REQs yet")
+        # The resume point, surfaced here because every session starts with
+        # 'state show' — an agent interrupted mid-phase is invisible otherwise.
+        phase_tasks = (active.get("tasks") or {}).get(active.get("phase", ""), [])
+        open_tasks = [t for t in phase_tasks if t.get("status") in OPEN_TASK_STATES]
+        if open_tasks:
+            t = resume_point(phase_tasks)
+            print(f"Open tasks in this phase: {len(open_tasks)} — resume at "
+                  f"{t.get('id')}. {t.get('text', '')} <{t.get('agent', '?')}>"
+                  f"\n  ('kivax task list' for the full list)")
         archived = state.get("features") or {}
         if archived:
             print("Archived features:", ", ".join(
@@ -206,7 +240,7 @@ def main() -> int:
         active = require_active(state)
         reqs = active.setdefault("requirements", {})
         reqs.setdefault(rid, {})["status"] = status
-        reqs[rid]["updated_at"] = _now()
+        reqs[rid]["updated_at"] = now()
         log(state, f"{rid} -> {status}")
         save_state(root, cfg, state)
         print(f"{rid}: {status}")
@@ -229,7 +263,7 @@ def main() -> int:
         added = 0
         for rid in ids:
             if rid not in reqs:
-                reqs[rid] = {"status": "pending", "updated_at": _now()}
+                reqs[rid] = {"status": "pending", "updated_at": now()}
                 added += 1
         if added:
             log(state, f"sync-reqs: {added} new ids as pending")
