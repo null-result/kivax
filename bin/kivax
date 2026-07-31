@@ -27,7 +27,12 @@ Usage:
                              Per-agent task lists for the active feature, so an
                              interrupted session resumes mid-agent instead of
                              redoing the phase. 'list' shows the resume point.
-  kivax validate|hash|trace|state|task|wiki|specfirst [args...]
+  kivax lessons <list|show|new|relevant|check|lint> [args]
+                             The lessons store: what past iterations cost.
+                             'relevant --phase <p>' is what a phase reads before
+                             working; 'check' is the audit gate (exit 1 when an
+                             applicable lesson isn't answered for in plan.md).
+  kivax validate|hash|trace|state|task|wiki|lessons|specfirst [args...]
                               Passes control to the matching script.
 
 KIVAX_HOME (default ~/.kivax) must point to the global store created by
@@ -85,7 +90,7 @@ def regenerate_agents() -> None:
         AGENT_CACHE_BODY.parent.mkdir(parents=True, exist_ok=True)
         AGENT_CACHE_BODY.write_text(body.lstrip("\n"), encoding="utf-8")
 
-PASSTHROUGH = {"validate", "hash", "trace", "state", "task", "wiki", "specfirst"}
+PASSTHROUGH = {"validate", "hash", "trace", "state", "task", "wiki", "lessons", "specfirst"}
 
 # (key, human label, default answer) — key is what ends up in .kivax/config.yml's
 # 'runtimes' list and every runtime-keyed dict in this file. 'vscode-copilot' and
@@ -264,7 +269,7 @@ def sync_pairs(runtimes: list[str]) -> list[tuple[Path, Path]]:
     if {"claude", "opencode", "cursor", "copilot-cli", "codex"} & runtimes_set:
         pairs.append((Path("AGENTS.md"), AGENT_CACHE_BODY))
 
-    # Skills: 5 shared reference skills + 13 phase-driver skills, copied
+    # Skills: 6 shared reference skills + 14 phase-driver skills, copied
     # unchanged into every active runtime's own skills directory.
     skill_dest_dirs: list[Path] = []
     if "claude" in runtimes:
@@ -466,19 +471,25 @@ def cmd_init(argv: list[str]) -> int:
         print("Remember: once you migrate a zone (retroactive spec + tests), remove it from this list.")
 
     # 8) write config
-    pipeline = ["spec", "compile", "plan", "tdd", "it", "audit"]
+    pipeline = ["spec", "compile", "plan", "tdd", "it", "audit", "retro"]
     # 'features' is the root holding one directory per feature; the filenames
     # inside each (spec.md / spec.yml / plan.md) are fixed, not configurable —
     # feature discovery works by globbing, which varying filenames would break.
     paths = {
         "features": specs_dir,
         "wiki": f"{specs_dir}/wiki",
+        # The lessons store: what each iteration cost, kept so the next one
+        # doesn't pay it again. Sibling of the wiki, not part of it — the wiki
+        # is derived from the spec and every claim on a page traces to a REQ,
+        # which a lesson about a recurring bug never can.
+        "lessons": f"{specs_dir}/lessons",
         "state": ".kivax/state.yml",
         "lock": ".kivax/traceability.lock.json",
     }
     gates = {
         "spec": "human", "compile": "human", "plan": "human",
-        "tdd": "auto", "it": "auto", "audit": "human", "evolve": "human",
+        "tdd": "auto", "it": "auto", "audit": "human", "retro": "human",
+        "evolve": "human",
     }
     if include_principles_architecture:
         pipeline = ["principles", "architecture"] + pipeline
@@ -1126,6 +1137,12 @@ def cmd_doctor(argv: list[str]) -> int:
     for phase in ("principles", "architecture"):
         if phase in configured_pipeline:
             required_path_keys.append(phase)
+    # The retro phase writes into paths.lessons. `kivax lessons` falls back to
+    # '<paths.features>/lessons' when the key is absent, so nothing breaks — but
+    # an implicit path is one nobody knows to review in a PR, and 'kivax upgrade'
+    # never adds config keys for you, so say it here.
+    if "retro" in configured_pipeline:
+        required_path_keys.append("lessons")
     for key in required_path_keys:
         if key not in cfg.get("paths", {}):
             problems.append(f"missing paths.{key} in config.yml")

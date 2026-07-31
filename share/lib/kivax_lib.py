@@ -314,7 +314,8 @@ def spec_hashes(spec: dict) -> dict:
     return out
 
 
-DEFAULT_PIPELINE = ["principles", "architecture", "spec", "compile", "plan", "tdd", "it", "audit"]
+DEFAULT_PIPELINE = ["principles", "architecture", "spec", "compile", "plan", "tdd", "it",
+                    "audit", "retro"]
 MANDATORY_PREFIX = ["spec", "compile"]
 OPTIONAL_PRE_PHASES = {"principles", "architecture"}
 TERMINAL_PHASE = "done"

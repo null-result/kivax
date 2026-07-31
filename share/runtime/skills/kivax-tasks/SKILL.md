@@ -1,6 +1,6 @@
 ---
 name: kivax-tasks
-description: "Protocol for the per-agent task lists that make an interrupted session resumable mid-agent. Read by every long-running specialist (researcher, spec-analyst, tech-planner, test-writer, implementer, wiki-curator) before starting work, and by the orchestrator when picking a session back up."
+description: "Protocol for the per-agent task lists that make an interrupted session resumable mid-agent. Read by every long-running specialist (researcher, spec-analyst, tech-planner, test-writer, implementer, wiki-curator, knowledge-curator) before starting work, and by the orchestrator when picking a session back up."
 ---
 
 # Task lists: resuming an interrupted session

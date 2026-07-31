@@ -22,9 +22,10 @@ Write tests that encode the specification BEFORE any implementation exists. Test
 ### Protocol
 1. Read the `kivax-tdd-loop` and `kivax-yml-spec` skills.
 2. Read `.kivax/config.yml`: the active stack profile (test framework, REQ-tagging convention, commands).
-3. You'll receive one or more REQ-IDs or IT-IDs. For each, read from the owning feature's `spec.yml` ONLY that requirement/scenario and its acceptance criteria, and from its `plan.md` ONLY the relevant interface contracts. Don't read the rest.
-4. **Integration tests**: derived from `integration_scenarios` in the yml, tagged with the IT-ID and the REQ-IDs they cover.
-5. Run the tests and VERIFY THEY FAIL (red) with the expected message, unless the implementation should already cover them (in which case run them directly). A test that passes without implementation or coverage is an invalid test: rewrite it.
+3. Run `kivax lessons relevant --phase it`. Integration tests are where this project's flakiness lives, and the retro phase records exactly which shapes of it recurred — read them before you write, not after a test misbehaves.
+4. You'll receive one or more REQ-IDs or IT-IDs. For each, read from the owning feature's `spec.yml` ONLY that requirement/scenario and its acceptance criteria, and from its `plan.md` ONLY the relevant interface contracts. Don't read the rest.
+5. **Integration tests**: derived from `integration_scenarios` in the yml, tagged with the IT-ID and the REQ-IDs they cover.
+6. Run the tests and VERIFY THEY FAIL (red) with the expected message, unless the implementation should already cover them (in which case run them directly). A test that passes without implementation or coverage is an invalid test: rewrite it.
 
 ### Hard rules
 - You NEVER write production code. If a test doesn't compile because a contract is missing, use exactly the plan's signature; if the plan doesn't define it, report it.
@@ -46,7 +47,7 @@ Turn existing tests green, requirement by requirement, writing the minimum produ
 
 ### Protocol
 1. Read the `kivax-tdd-loop` skill.
-2. Read `.kivax/config.yml` (stack profile: test commands) and the active feature's `plan.md` (path from `kivax feature show --json`).
+2. Read `.kivax/config.yml` (stack profile: test commands) and the active feature's `plan.md` (path from `kivax feature show --json`), **including its `## Lessons applied` section**, plus `kivax lessons relevant --phase it`.
 3. You'll receive a REQ-ID or IT-ID. Locate its tests (tagged with that ID), run them, confirm they're red.
 4. Implement following the plan's contracts. Short cycle: implement → run the affected tests → repeat until green.
 5. With it green, run the FULL suite (unit + IT for the active profile(s)) to verify you didn't break anything.
