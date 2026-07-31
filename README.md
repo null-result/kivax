@@ -83,8 +83,8 @@ kivax init
 It's an interactive wizard that:
 
 1. **Asks which assistant(s) you use** — Claude Code, opencode, Cursor, GitHub Copilot in VS Code, GitHub Copilot CLI, OpenAI Codex CLI. Any combination (Claude Code defaults to yes, the rest to no).
-2. **Detects greenfield vs. existing code** (counts source files) and asks you to confirm — it never decides on its own. Stored as `greenfield` in the config, because the constitution and architecture phases need it later.
-3. **Asks whether to include the `constitution` and `architecture` phases** (default yes) — see [Constitution and architecture](#constitution-and-architecture).
+2. **Detects greenfield vs. existing code** (counts source files) and asks you to confirm — it never decides on its own. Stored as `greenfield` in the config, because the principles and architecture phases need it later.
+3. **Asks whether to include the `principles` and `architecture` phases** (default yes) — see [Principles and architecture](#principles-and-architecture).
 4. **Chooses the features root.** Kivax keeps one directory per feature under it (`specs/01-booking/`, `specs/02-cancel/`). If the project isn't greenfield it looks for `specs/`, `spec/`, `docs/specs/`… and offers what it finds — but if that folder already holds loose markdown, it says so and suggests a separate folder instead: Kivax never reads, moves, or migrates a pre-existing corpus of specs.
 5. **Asks what language the spec *content* should be written in** (`spec_language`) — see [Language](#language).
 6. **Detects your stack** by looking for `pom.xml`, `package.json`, `pyproject.toml`, `go.mod`… at the root and in first-level subdirectories (monorepo support), and presents it for confirmation.
@@ -122,12 +122,12 @@ Once installed, you drive Kivax by **talking to your assistant**, not by typing 
 The default sequence (the `pipeline` list in `.kivax/config.yml`):
 
 ```
-constitution → architecture → spec → compile → plan → tdd → it → audit → retro → done
+principles → architecture → spec → compile → plan → tdd → it → audit → retro → done
 ```
 
 | Phase | Skill | What happens | Default gate |
 |---|---|---|---|
-| `constitution` | `kivax-constitution` | Ratifies `CONSTITUTION.md` once. Self-skipping if the file exists. | human |
+| `principles` | `kivax-principles` | Ratifies `PRINCIPLES.md` once. Self-skipping if the file exists. | human |
 | `architecture` | `kivax-architecture` | Creates `ARCHITECTURE.md` once. Self-skipping if the file exists. | human |
 | `spec` | `kivax-spec` | Drafts/refines the narrative `spec.md` by interviewing you. | human |
 | `compile` | `kivax-compile` | Compiles `spec.md` → canonical `spec.yml`; validates and hashes it. | human |
@@ -139,7 +139,7 @@ constitution → architecture → spec → compile → plan → tdd → it → a
 
 A **gate** is what happens at the end of a phase: `human` means the assistant stops and waits for your explicit approval; `auto` means it chains straight into the next phase. Gates are configurable per phase in `.kivax/config.yml`; an unconfigured gate is `human` (fail-safe).
 
-**Exceptions are not gates and are not configurable.** An `AMBIGUITY`, `DISPUTE`, `GAP`, `CONFLICT`, `CONSTITUTION-VIOLATION`, a `NOT PASSING` audit verdict, or a failed validation **always** stops the flow and comes to you, even when the gate is `auto`. `auto` delegates approval, never quality control.
+**Exceptions are not gates and are not configurable.** An `AMBIGUITY`, `DISPUTE`, `GAP`, `CONFLICT`, `PRINCIPLES-VIOLATION`, a `NOT PASSING` audit verdict, or a failed validation **always** stops the flow and comes to you, even when the gate is `auto`. `auto` delegates approval, never quality control.
 
 ### A first feature, end to end
 
@@ -174,7 +174,9 @@ That's `kivax-run`: it chains `tdd` (red tests → green code, one REQ at a time
 | Record what an iteration taught | `kivax-retro` | Runs after the audit. Writes the lessons store; later phases must answer for it. |
 | Document legacy code before touching it | `kivax-spec` ("document the current behavior of X") | Retroactive spec mode — describes what the code *does*, not what it should do. |
 
-Five more skills are reference material the specialists read rather than phases you invoke: `kivax-spec-writing`, `kivax-yml-spec`, `kivax-tdd-loop`, `kivax-wiki-schema`, `kivax-lessons-schema`.
+Six more skills are reference material the specialists read rather than phases you invoke: `kivax-spec-writing`, `kivax-yml-spec`, `kivax-tdd-loop`, `kivax-wiki-schema`, `kivax-lessons-schema`, `kivax-tasks`.
+
+**Vague ideas get researched first.** If you arrive with a problem that has no shape yet — or one whose answer depends on options nobody on the team has checked — the `spec` phase can bring in the **researcher** before the interview starts. It's the one agent that reaches the internet: it reads your principles, architecture, and code first so it only proposes things this project can actually do, then comes back with `specs/NN-slug/research.md` — two or more real options with their costs, concrete prior art, and every claim carrying a dated source URL. It writes no requirements; the spec-analyst uses the brief as the starting point of its interview, and you approve what makes it into the spec. It's optional and skipped by default when you already know what you want — the assistant asks rather than assuming.
 
 > `kivax init` (terminal, project setup) is a different thing from `kivax-new` (chat, start a feature). The first is infrastructure and you run it yourself; the second is workflow.
 
@@ -182,6 +184,7 @@ Five more skills are reference material the specialists read rather than phases 
 
 | File | Owner | Lifecycle |
 |---|---|---|
+| `specs/NN-slug/research.md` | researcher | Optional. Options, prior art, and cited sources behind a vague idea — input to the spec, never a requirement. |
 | `specs/NN-slug/spec.md` | spec-analyst | That feature's narrative spec — the human-readable source. |
 | `specs/NN-slug/spec.yml` | spec-compiler | That feature's canonical anchor. IDs are immutable; hashes drive invalidation. |
 | `specs/NN-slug/plan.md` | tech-planner | Contracts, REQ→module→test mapping, implementation order for that feature. |
@@ -189,9 +192,33 @@ Five more skills are reference material the specialists read rather than phases 
 | `specs/lessons/LSN-*.md` | knowledge-curator | What past iterations cost. Written by `retro`, enforced at the audit gate. |
 | `.kivax/state.yml` | the CLI | Current phase and per-REQ status. The single source of truth across sessions. |
 | `.kivax/traceability.lock.json` | trace-auditor | Hashes and REQ→tests from the last PASSING cycle. |
-| `CONSTITUTION.md` / `ARCHITECTURE.md` | spec-analyst / tech-planner | Project-wide, opt-in. |
+| `PRINCIPLES.md` / `ARCHITECTURE.md` | spec-analyst / tech-planner | Project-wide, opt-in. |
 
 State lives in the repo, not in the assistant's context — you can close the session, come back tomorrow, and it picks up from `.kivax/state.yml`.
+
+### Interrupted mid-agent
+
+Knowing the phase isn't always enough. If the session dies while the tech-planner is halfway through exploring your modules, "phase: plan" tells the next session to start the plan — not to finish the one already half-written on disk. Re-running from scratch is worse than it sounds: an agent given the same prompt twice can produce a *different* plan, and you end up reconciling two.
+
+So the long-running specialists — researcher, spec-analyst, tech-planner, test-writer, implementer, wiki-curator, knowledge-curator — write down their steps before working and mark them off as they go, via `kivax task`. The list lives in `.kivax/state.yml` beside the phase and the per-REQ status, and is archived and restored with its feature.
+
+```bash
+kivax task list
+```
+
+```
+Phase 'spec' (01-cancel-booking):
+  [x] 1. Read PRINCIPLES.md and ARCHITECTURE.md  <researcher>
+  [~] 2. Search primary sources for option A  <researcher>  (3 of 6 sources checked)
+  [ ] 3. Write research.md  <researcher>
+
+1/3 closed.
+Resume at: 2. Search primary sources for option A  <researcher>
+```
+
+You don't run this yourself in normal use: `kivax state show` ends with the same resume point, and the orchestrator reads it at the start of every session — it will tell you what was in flight and offer to continue rather than restart. The single-pass agents (spec-compiler, trace-auditor, reviewer) keep no list, because re-running them from scratch is already the right recovery.
+
+These tasks are **not** requirements. A task is one agent's disposable working step; a REQ is the flow's contract, tracked separately and read by traceability. Nothing in the audit ever looks at a task.
 
 ### One spec per feature
 
@@ -225,26 +252,26 @@ One technical constraint that never changes: the **keys** in `spec.yml` (`given`
 
 ---
 
-## Constitution and architecture
+## Principles and architecture
 
 Two project-wide artifacts, distinct from the per-feature `spec.md`/`plan.md`, with opposite lifecycles:
 
-- **`CONSTITUTION.md`** — the project's non-negotiable engineering principles, ratified once by the `constitution` phase (the spec-analyst interviews you). It is **not** a living document: once ratified it changes only on an explicit request to amend it, never as a side effect of a feature.
+- **`PRINCIPLES.md`** — the project's non-negotiable engineering principles, ratified once by the `principles` phase (the spec-analyst interviews you). It is **not** a living document: once ratified it changes only on an explicit request to amend it, never as a side effect of a feature.
 - **`ARCHITECTURE.md`** — the system's actual technical shape, created once by the `architecture` phase (the tech-planner drafts it from the intended stack for a greenfield project, or reverse-engineers it from the existing codebase — decided by the `greenfield` flag) and then kept current **incrementally**: every `kivax-plan` updates only the sections the feature actually affects.
 
 Both phases are **self-skipping**: if the file already exists the phase is a no-op and advances immediately, no gate involved — in practice they only do real work on a project's first feature. They're optional (decline them during `kivax init`, or remove them from `pipeline` later), but when present they're the only phases allowed to precede `spec`/`compile`.
 
-Every `kivax-plan` and `kivax-audit` also cross-checks the feature against `CONSTITUTION.md` when it exists. A conflict is a `CONSTITUTION-VIOLATION:` — always escalated to you, never auto-resolved, regardless of the gate.
+Every `kivax-plan` and `kivax-audit` also cross-checks the feature against `PRINCIPLES.md` when it exists. A conflict is a `PRINCIPLES-VIOLATION:` — always escalated to you, never auto-resolved, regardless of the gate.
 
 **Adopting this on a project installed before the feature existed** is a manual edit — `kivax upgrade` never rewrites `config.yml` for you:
 
 ```yaml
-pipeline: [constitution, architecture, spec, compile, plan, tdd, it, audit]
+pipeline: [principles, architecture, spec, compile, plan, tdd, it, audit]
 paths:
-  constitution: CONSTITUTION.md
+  principles: PRINCIPLES.md
   architecture: ARCHITECTURE.md
 gates:
-  constitution: human
+  principles: human
   architecture: human
 ```
 
@@ -290,7 +317,7 @@ A lesson is **never** a substitute for a requirement. If what the retro found is
 **Adopting this on a project installed before the phase existed** is a manual edit (`kivax upgrade` copies the new skill and agent in, but never rewrites `config.yml`):
 
 ```yaml
-pipeline: [constitution, architecture, spec, compile, plan, tdd, it, audit, retro]
+pipeline: [principles, architecture, spec, compile, plan, tdd, it, audit, retro]
 paths:
   lessons: specs/lessons
 gates:
@@ -301,7 +328,7 @@ gates:
 
 ## Extending the pipeline (custom phases)
 
-The phase sequence is data: the `pipeline` list in `.kivax/config.yml`. You can **add, remove, or reorder** phases — including entirely custom ones — by editing that list. Two invariants are enforced and not configurable: **`spec, compile` must appear consecutively**, and **only `constitution`/`architecture` may precede them**. Those two are what makes the flow spec-anchored; `kivax state` and `kivax doctor` reject any pipeline that puts a custom phase ahead of them.
+The phase sequence is data: the `pipeline` list in `.kivax/config.yml`. You can **add, remove, or reorder** phases — including entirely custom ones — by editing that list. Two invariants are enforced and not configurable: **`spec, compile` must appear consecutively**, and **only `principles`/`architecture` may precede them**. Those two are what makes the flow spec-anchored; `kivax state` and `kivax doctor` reject any pipeline that puts a custom phase ahead of them.
 
 To add a custom phase (say `deploy`):
 
@@ -320,13 +347,13 @@ Kivax doesn't model what your phase does — environments, deploy targets, and t
 ~/.kivax/                              (global store, one per machine — the "upstream")
   agents/<name>.md                     (canonical: description + tools + body — one file per
                                          specialist, PLUS orchestrator.md, shared by every runtime)
-  runtime/skills/                      (shared by all 6 runtimes — 5 reference skills +
+  runtime/skills/                      (shared by all 6 runtimes — 6 reference skills +
                                          14 phase-driver skills, e.g. kivax-spec/, kivax-plan/)
   lib/kivax_*.py                       (scripts, invoked via the CLI)
   lib/agent_runtimes.yml               (per-runtime agent frontmatter recipe)
   lib/kivax_agents.py                  (renders agents/*.md + agent_runtimes.yml into each
                                          runtime's agent-file shape)
-  templates/                           (spec, plan, constitution, architecture, state, PR…)
+  templates/                           (spec, plan, research, principles, architecture, state, PR…)
   examples/custom-phases/              (ready-to-copy pipeline extension)
   ci/                                  (sample CI gate workflow)
 
@@ -342,7 +369,7 @@ your-project/                          (all committed to git, no exceptions)
   .github/copilot-instructions.md   # if you use GitHub Copilot in VS Code
   .codex/skills/*/SKILL.md   # if you use OpenAI Codex CLI
   CLAUDE.md / AGENTS.md      # same content, two filenames — Claude Code needs the former
-  CONSTITUTION.md            # if you opted in — ratified once, rarely touched again
+  PRINCIPLES.md              # if you opted in — ratified once, rarely touched again
   ARCHITECTURE.md            # if you opted in — kept current via kivax-plan
   .kivax/
     config.yml               # project config, yours, editable
@@ -421,6 +448,7 @@ You'll rarely type these — the assistant runs most of them for you. The ones y
 | `kivax hash [--diff] [--json] [--feature NN]` | Current hashes across all features, or the diff against the lock. **Exit 2 = there is pending work, not an error** |
 | `kivax trace [--report-only\|--update-lock\|--json]` | Traceability audit across every feature: coverage, freshness, orphans. Exit 1 if NOT PASSING |
 | `kivax state <show\|set-phase\|set-req\|sync-reqs\|gate\|next>` | Phase and per-requirement status of the active feature |
+| `kivax task <add\|list\|set\|next\|clear>` | Per-agent checklists for the active feature. `list` shows where to resume after an interruption |
 | `kivax wiki <lint\|stale> [--strict] [--json]` | Wiki provenance checks |
 | `kivax lessons <list\|show\|new\|relevant\|check\|lint>` | The lessons store. `relevant --phase <p>` is what a phase reads; `check` is what the audit enforces (exit 1 = an applicable lesson isn't answered for in `plan.md`) |
 | `kivax specfirst [--json] [--base <branch>]` | Classify the branch diff into tests / kivax / legacy / production |
@@ -508,12 +536,12 @@ share/
                        coordinator, rendered like every other agent and additionally
                        stripped of frontmatter to produce AGENTS.md / CLAUDE.md /
                        copilot-instructions.md. Nothing here is copied verbatim.
-  runtime/skills/     5 reference skills + 14 phase-driver skills, shared by all 6
+  runtime/skills/     6 reference skills + 14 phase-driver skills, shared by all 6
                        runtimes (just placed in each one's own skills directory)
   lib/                kivax_*.py scripts the CLI dispatches to, the stack-profile catalog,
                        agent_runtimes.yml, and kivax_agents.py (the renderer)
-  templates/          Starting scaffolds (spec, plan, constitution, architecture, lesson,
-                       state, PR)
+  templates/          Starting scaffolds (spec, plan, research, principles, architecture,
+                       lesson, state, PR)
   examples/           Ready-to-copy extensions, e.g. custom-phases (deploy + regression)
   ci/                 Sample CI gate workflow
 ```

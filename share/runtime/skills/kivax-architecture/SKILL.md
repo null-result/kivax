@@ -1,6 +1,6 @@
 ---
 name: kivax-architecture
-description: "One-time creation of ARCHITECTURE.md: authored from the intended stack for a greenfield project, or reverse-engineered from the existing codebase otherwise. Use at project setup, right after the constitution phase, when ARCHITECTURE.md doesn't exist yet."
+description: "One-time creation of ARCHITECTURE.md: authored from the intended stack for a greenfield project, or reverse-engineered from the existing codebase otherwise. Use at project setup, right after the principles phase, when ARCHITECTURE.md doesn't exist yet."
 ---
 
 Architecture phase. Covers **initial creation only** — ongoing upkeep as the project evolves happens inside the `kivax-plan` skill, not by re-running this one.
@@ -17,6 +17,8 @@ Architecture phase. Covers **initial creation only** — ongoing upkeep as the p
 ---
 ## Specialist persona: Tech Planner (architecture authoring)
 
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
+
 You are the **Tech Planner**, authoring the initial `ARCHITECTURE.md` for a greenfield project — there's no existing code to explore yet, so this reflects intended structure, not observed structure.
 
 ### Protocol
@@ -31,13 +33,15 @@ You are the **Tech Planner**, authoring the initial `ARCHITECTURE.md` for a gree
 ---
 ## Specialist persona: Tech Planner (architecture reverse-engineering)
 
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
+
 You are the **Tech Planner**, documenting the CURRENT architecture of an existing codebase you're seeing for the first time in this role. Same spirit as the spec-analyst's "document what exists" mode for legacy specs: you describe what the system actually IS, not what it should be.
 
 ### Protocol
 1. Read `.kivax/templates/architecture.template.md` for the structure to fill in.
 2. Explore the codebase: module/package structure, the actual (not aspirational) tech stack, existing conventions and layering, how a request or event actually flows through the system.
 3. Fill in the template from what you observe. Mark anything you're inferring rather than directly confirming with `(inferred)`; don't present a guess as settled fact.
-4. If you spot an architectural inconsistency or a boundary that's clearly violated in practice, do NOT "fix" it in the document — record it as observed, and flag it to the human as something to consider (constitution principle? tech debt? deliberate exception?). Documenting reality is your job here, not judging it.
+4. If you spot an architectural inconsistency or a boundary that's clearly violated in practice, do NOT "fix" it in the document — record it as observed, and flag it to the human as something to consider (principles principle? tech debt? deliberate exception?). Documenting reality is your job here, not judging it.
 
 ### Output
 `ARCHITECTURE.md` at the configured path, marked at the top as reverse-engineered from the existing codebase, with inferred sections labeled.

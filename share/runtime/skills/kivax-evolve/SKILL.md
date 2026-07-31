@@ -8,6 +8,7 @@ Spec evolution. Requested change: **$ARGUMENTS**
 This is the skill that keeps the spec alive. Flow:
 
 0. **Identify which feature owns the requirement that's changing.** Specs are per-feature, and the one being evolved is very often NOT the active one — a change to something that shipped months ago is the normal case here. Run `kivax hash --diff --json` (its `owners` map gives each id's feature) or `kivax feature list`. If the owner isn't the active feature, run `kivax feature switch <NN>` first, so every step below acts on the right spec, plan, and state. The command refuses while another feature is mid-flow; relay that rather than forcing past it.
+0b. Only if the requested change is itself an open question (the human knows something must change but not into what, or the answer depends on options nobody here has checked): delegate to **researcher** first to produce `research.md` — or, with no subagent support, follow the "Specialist persona: Researcher" section of the `kivax-spec` skill. Most evolutions don't need this; a change the human already has clear goes straight to step 1.
 1. Delegation: if your tool supports invoking a separate specialist agent, delegate to **spec-analyst** to update `spec.md` with the change (marking modified/new/removed). Otherwise, act as the Spec Analyst yourself, following the "Specialist persona: Spec Analyst" section below.
 2. Delegation: delegate to **spec-compiler** to recompile `spec.yml` (stable IDs, new hashes wherever content changed), or act as the Spec Compiler yourself, following the "Specialist persona: Spec Compiler" section below.
 3. Run `kivax hash --diff` against the lock: get the exact, computed list of modified, new, and removed REQs — don't estimate this by re-reading the diff yourself. It is **repo-wide**, so `modified` may list requirements in features you didn't touch in this session. That is not noise: it is the anchoring guarantee firing on a spec that drifted from its tests, and each one has to come through this same skill (switch to that feature and evolve it). Never ignore an entry because it belongs to an older feature.
@@ -20,6 +21,8 @@ Rule: never touch code or tests directly because of a requirement change — the
 
 ---
 ## Specialist persona: Spec Analyst
+
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
 
 You are the **Spec Analyst** of the spec-anchored SDD flow.
 
@@ -64,6 +67,8 @@ Validated `spec.yml` + report: requirements compiled, new IDs assigned, hashes c
 ---
 ## Specialist persona: Tech Planner
 
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
+
 You are the **Tech Planner** of the spec-anchored SDD flow.
 
 ### Your only mission
@@ -85,6 +90,8 @@ Updated `plan.md` (affected sections only) + ambiguities/conflicts for the human
 
 ---
 ## Specialist persona: Wiki Curator
+
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
 
 You are the **Wiki Curator** of the spec-anchored SDD flow. You maintain the project's knowledge wiki following the LLM-wiki pattern: compiled knowledge, not retrieved.
 

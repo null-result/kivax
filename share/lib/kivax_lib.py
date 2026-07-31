@@ -314,10 +314,10 @@ def spec_hashes(spec: dict) -> dict:
     return out
 
 
-DEFAULT_PIPELINE = ["constitution", "architecture", "spec", "compile", "plan", "tdd", "it",
+DEFAULT_PIPELINE = ["principles", "architecture", "spec", "compile", "plan", "tdd", "it",
                     "audit", "retro"]
 MANDATORY_PREFIX = ["spec", "compile"]
-OPTIONAL_PRE_PHASES = {"constitution", "architecture"}
+OPTIONAL_PRE_PHASES = {"principles", "architecture"}
 TERMINAL_PHASE = "done"
 
 
@@ -330,9 +330,9 @@ def pipeline_of(cfg: dict) -> list[str]:
     agent file too).
 
     Invariants enforced and NOT configurable:
-      - Only 'constitution' and/or 'architecture' may precede ['spec',
+      - Only 'principles' and/or 'architecture' may precede ['spec',
         'compile'] — both are optional, self-skipping setup phases (their
-        skill checks whether CONSTITUTION.md/ARCHITECTURE.md already exists
+        skill checks whether PRINCIPLES.md/ARCHITECTURE.md already exists
         and, if so, advances immediately without doing anything). Whatever
         comes after that optional leading run must start with
         ['spec', 'compile']: they're what makes the flow spec-anchored.
@@ -347,7 +347,7 @@ def pipeline_of(cfg: dict) -> list[str]:
     while i < len(pl) and pl[i].strip() in OPTIONAL_PRE_PHASES:
         i += 1
     if [p.strip() for p in pl[i:i + 2]] != MANDATORY_PREFIX:
-        sys.exit("ERROR: after any leading 'constitution'/'architecture' phases, the "
+        sys.exit("ERROR: after any leading 'principles'/'architecture' phases, the "
                  "pipeline must continue with ['spec', 'compile'] — these phases "
                  "are mandatory (they're what makes the flow spec-anchored). "
                  "Current pipeline: " + str(pl))

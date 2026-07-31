@@ -39,6 +39,7 @@ sys.path.insert(0, str(LIB_DIR))
 import kivax_hash as _kivax_hash_mod  # noqa: E402
 import kivax_lessons as _kivax_lessons_mod  # noqa: E402
 import kivax_specfirst as _kivax_specfirst_mod  # noqa: E402
+import kivax_task as _kivax_task_mod  # noqa: E402
 import kivax_trace as _kivax_trace_mod  # noqa: E402
 import kivax_validate as _kivax_validate_mod  # noqa: E402
 import kivax_wiki as _kivax_wiki_mod  # noqa: E402
@@ -109,6 +110,11 @@ def klessons():
 @pytest.fixture
 def kstate():
     return _kivax_state_mod
+
+
+@pytest.fixture
+def ktask():
+    return _kivax_task_mod
 
 
 @pytest.fixture
@@ -224,7 +230,7 @@ def use_store(monkeypatch, kivax_cli, store):
 DEFAULT_INIT_ANSWERS = (
     "\n" + "\n" * 5           # runtimes: claude=default(yes), the rest default(no)
     + "y\n"                   # greenfield
-    + "\n"                    # constitution+architecture: default yes
+    + "\n"                    # principles+architecture: default yes
     + "\n"                    # features root: default 'specs'
     + "\n"                    # spec_language: default 'en'
     + "python-pytest\n"       # manual stack profile (no markers found under tmp_path)
