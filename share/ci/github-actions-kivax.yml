@@ -30,3 +30,9 @@ jobs:
       # - run: ./mvnw -q verify -Pintegration
       - name: Traceability audit (fails if NOT PASSING)
         run: kivax trace
+      # Unlike the two above, this one acts on the ACTIVE feature (the branch's
+      # own, from .kivax/state.yml) — it fails when a recorded lesson that
+      # applies to this change isn't answered for in its plan.md under
+      # '## Lessons applied'. Drop this step if you don't run the retro phase.
+      - name: Lessons acknowledged in the plan
+        run: kivax lessons check

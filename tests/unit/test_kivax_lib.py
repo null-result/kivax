@@ -348,9 +348,9 @@ def test_pipeline_of_default(klib, minimal_config):
 
 @pytest.mark.parametrize("pipeline", [
     ["spec", "compile", "plan"],
-    ["constitution", "spec", "compile"],
+    ["principles", "spec", "compile"],
     ["architecture", "spec", "compile"],
-    ["constitution", "architecture", "spec", "compile", "deploy"],
+    ["principles", "architecture", "spec", "compile", "deploy"],
 ])
 def test_pipeline_of_valid_custom(klib, minimal_config, pipeline):
     cfg = minimal_config(pipeline=pipeline)

@@ -37,7 +37,9 @@ LIB_DIR = REPO / "share" / "lib"
 sys.path.insert(0, str(LIB_DIR))
 
 import kivax_hash as _kivax_hash_mod  # noqa: E402
+import kivax_lessons as _kivax_lessons_mod  # noqa: E402
 import kivax_specfirst as _kivax_specfirst_mod  # noqa: E402
+import kivax_task as _kivax_task_mod  # noqa: E402
 import kivax_trace as _kivax_trace_mod  # noqa: E402
 import kivax_validate as _kivax_validate_mod  # noqa: E402
 import kivax_wiki as _kivax_wiki_mod  # noqa: E402
@@ -101,8 +103,18 @@ def kwiki():
 
 
 @pytest.fixture
+def klessons():
+    return _kivax_lessons_mod
+
+
+@pytest.fixture
 def kstate():
     return _kivax_state_mod
+
+
+@pytest.fixture
+def ktask():
+    return _kivax_task_mod
 
 
 @pytest.fixture
@@ -218,7 +230,7 @@ def use_store(monkeypatch, kivax_cli, store):
 DEFAULT_INIT_ANSWERS = (
     "\n" + "\n" * 5           # runtimes: claude=default(yes), the rest default(no)
     + "y\n"                   # greenfield
-    + "\n"                    # constitution+architecture: default yes
+    + "\n"                    # principles+architecture: default yes
     + "\n"                    # features root: default 'specs'
     + "\n"                    # spec_language: default 'en'
     + "python-pytest\n"       # manual stack profile (no markers found under tmp_path)
@@ -308,15 +320,15 @@ def minimal_config():
             "runtimes": ["claude"],
             "spec_language": "en",
             "greenfield": True,
-            "pipeline": ["spec", "compile", "plan", "tdd", "it", "audit"],
+            "pipeline": ["spec", "compile", "plan", "tdd", "it", "audit", "retro"],
             "paths": {
-                "features": "specs", "wiki": "specs/wiki",
+                "features": "specs", "wiki": "specs/wiki", "lessons": "specs/lessons",
                 "state": ".kivax/state.yml", "lock": ".kivax/traceability.lock.json",
             },
             "git": {"base_branch": "main", "branch_prefix": "kivax/"},
             "legacy_globs": [],
             "gates": {"spec": "human", "compile": "human", "plan": "human",
-                     "tdd": "auto", "it": "auto", "audit": "human"},
+                     "tdd": "auto", "it": "auto", "audit": "human", "retro": "human"},
             "stack": {"active": ["python-pytest"], "profiles": {
                 "python-pytest": {
                     "root": "", "test_globs": ["tests/**/*.py"],
