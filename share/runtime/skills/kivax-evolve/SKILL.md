@@ -12,7 +12,7 @@ This is the skill that keeps the spec alive. Flow:
 2. Delegation: delegate to **spec-compiler** to recompile `spec.yml` (stable IDs, new hashes wherever content changed), or act as the Spec Compiler yourself, following the "Specialist persona: Spec Compiler" section below.
 3. Run `kivax hash --diff` against the lock: get the exact, computed list of modified, new, and removed REQs — don't estimate this by re-reading the diff yourself. It is **repo-wide**, so `modified` may list requirements in features you didn't touch in this session. That is not noise: it is the anchoring guarantee firing on a spec that drifted from its tests, and each one has to come through this same skill (switch to that feature and evolve it). Never ignore an entry because it belongs to an older feature.
 4. Selective invalidation — ONLY the affected ones, each an explicit call: `kivax state set-req <ID> invalidated` for every modified ID, one call per ID; new ones start `pending` automatically via `kivax state sync-reqs`; for removed ones, their tests must be deleted (delegate to test-writer, from the `kivax-tdd` skill) or they'll show up as orphans in the audit.
-5. If the change affects contracts or architecture: delegate to **tech-planner** to update the plan (only the affected sections), or act as the Tech Planner yourself, following the "Specialist persona: Tech Planner" section below.
+5. If the change affects contracts or architecture: delegate to **tech-planner** to update the plan (only the affected sections), or act as the Tech Planner yourself, following the "Specialist persona: Tech Planner" section below. Run `kivax lessons check` afterwards: a feature being evolved months later meets lessons that didn't exist when its plan was written, and each of those still has to be answered for under `## Lessons applied` before the audit will pass.
 6. If the wiki exists (`wiki/`), run `kivax wiki stale` and delegate to **wiki-curator** the reingest of ONLY the stale pages (same selective-invalidation principle), or act as the Wiki Curator yourself, following the "Specialist persona: Wiki Curator" section below.
 7. Check `kivax state gate evolve`. With `human` (recommended: invalidating tests is destructive), present the impact (affected REQs, invalidated tests, reingested wiki pages) and wait for approval. With `auto`, proceed directly. Either way, relaunch the `kivax-tdd` skill only for the affected IDs, chaining the rest of the flow per their gates.
 
@@ -72,7 +72,8 @@ Update `plan.md` to reflect the evolved `spec.yml`, touching only the sections a
 ### Protocol
 1. Read the `kivax-yml-spec` skill.
 2. Read the owning feature's `spec.yml` and its current `plan.md` (paths from `kivax feature show --json`).
-3. Update contracts, the REQ→modules→tests mapping, and implementation order ONLY for the affected REQs — leave unrelated sections untouched.
+3. Run `kivax lessons relevant --phase plan` — this feature's plan may predate lessons the project has learned since.
+4. Update contracts, the REQ→modules→tests mapping, and implementation order ONLY for the affected REQs — leave unrelated sections untouched. Bring `## Lessons applied` up to date (`kivax lessons check` lists what's missing); never delete a lesson to quiet the check.
 
 ### Hard rules
 - You don't write production code or tests: only contract signatures and structure.

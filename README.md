@@ -122,7 +122,7 @@ Once installed, you drive Kivax by **talking to your assistant**, not by typing 
 The default sequence (the `pipeline` list in `.kivax/config.yml`):
 
 ```
-constitution → architecture → spec → compile → plan → tdd → it → audit → done
+constitution → architecture → spec → compile → plan → tdd → it → audit → retro → done
 ```
 
 | Phase | Skill | What happens | Default gate |
@@ -135,6 +135,7 @@ constitution → architecture → spec → compile → plan → tdd → it → a
 | `tdd` | `kivax-tdd` | Per REQ: red unit tests, then minimum code until green. | auto |
 | `it` | `kivax-it` | Integration tests from the spec's `integration_scenarios`. | auto |
 | `audit` | `kivax-audit` | Traceability gate (`kivax trace`) + clean-context PR review. | human |
+| `retro` | `kivax-retro` | Records what the cycle *cost* as lessons the next one has to answer for. | human |
 
 A **gate** is what happens at the end of a phase: `human` means the assistant stops and waits for your explicit approval; `auto` means it chains straight into the next phase. Gates are configurable per phase in `.kivax/config.yml`; an unconfigured gate is `human` (fail-safe).
 
@@ -158,7 +159,7 @@ It compiles to `spec.yml` (`kivax-compile`), shows you the assigned REQ-IDs and 
 You:  Looks good — run through to the audit.
 ```
 
-That's `kivax-run`: it chains `tdd` (red tests → green code, one REQ at a time, one commit per REQ) and `it`, both `auto`, and stops at the `audit` human gate with the traceability verdict and the reviewer's findings. You merge; Kivax never does.
+That's `kivax-run`: it chains `tdd` (red tests → green code, one REQ at a time, one commit per REQ) and `it`, both `auto`, and stops at the `audit` human gate with the traceability verdict and the reviewer's findings. Approve, and `kivax-retro` writes down what the cycle cost — the bug that took three attempts, the assumption that was wrong twice — as lessons the *next* feature is forced to answer for. You merge; Kivax never does.
 
 ### Everyday commands (things you say)
 
@@ -170,9 +171,10 @@ That's `kivax-run`: it chains `tdd` (red tests → green code, one REQ at a time
 | Know where things stand | `kivax-status` | Current phase, REQs by status, coverage, stale hashes. |
 | Change a requirement after the fact | `kivax-evolve <change>` | Selectively invalidates only the affected REQs — never everything. Works on any feature, including ones that shipped long ago. |
 | Build/query the knowledge wiki | `kivax-wiki ingest \| query <question> \| lint` | Derived from the specs; the spec always wins. |
+| Record what an iteration taught | `kivax-retro` | Runs after the audit. Writes the lessons store; later phases must answer for it. |
 | Document legacy code before touching it | `kivax-spec` ("document the current behavior of X") | Retroactive spec mode — describes what the code *does*, not what it should do. |
 
-Four more skills are reference material the specialists read rather than phases you invoke: `kivax-spec-writing`, `kivax-yml-spec`, `kivax-tdd-loop`, `kivax-wiki-schema`.
+Five more skills are reference material the specialists read rather than phases you invoke: `kivax-spec-writing`, `kivax-yml-spec`, `kivax-tdd-loop`, `kivax-wiki-schema`, `kivax-lessons-schema`.
 
 > `kivax init` (terminal, project setup) is a different thing from `kivax-new` (chat, start a feature). The first is infrastructure and you run it yourself; the second is workflow.
 
@@ -184,6 +186,7 @@ Four more skills are reference material the specialists read rather than phases 
 | `specs/NN-slug/spec.yml` | spec-compiler | That feature's canonical anchor. IDs are immutable; hashes drive invalidation. |
 | `specs/NN-slug/plan.md` | tech-planner | Contracts, REQ→module→test mapping, implementation order for that feature. |
 | `specs/wiki/` | wiki-curator | Optional compiled knowledge, one page per domain concept. |
+| `specs/lessons/LSN-*.md` | knowledge-curator | What past iterations cost. Written by `retro`, enforced at the audit gate. |
 | `.kivax/state.yml` | the CLI | Current phase and per-REQ status. The single source of truth across sessions. |
 | `.kivax/traceability.lock.json` | trace-auditor | Hashes and REQ→tests from the last PASSING cycle. |
 | `CONSTITUTION.md` / `ARCHITECTURE.md` | spec-analyst / tech-planner | Project-wide, opt-in. |
@@ -247,6 +250,55 @@ gates:
 
 ---
 
+## The lessons store (the `retro` phase)
+
+`spec.yml` records what was built. The wiki records what it means. Neither records what it **cost** — which bug was rediscovered, which assumption was wrong twice, which fix had to be redone — and that's the knowledge a team actually loses between iterations. The `retro` phase runs last, after the audit passes, and writes it down.
+
+The knowledge-curator doesn't reconstruct the cycle from memory. It reads the evidence the repo already holds: `.kivax/state.yml`'s history (a REQ that cycled `red → green → red`, one marked `invalidated`), the branch's fix-on-fix commits, the audit violations, the reviewer's repeated BLOCKING findings. One lesson per file:
+
+```markdown
+---
+id: LSN-0007                      # allocated by `kivax lessons new`, never by hand
+title: Flyway migrations must run before the Spring test context boots
+phases: [plan, tdd, it]           # which phases get shown this lesson
+paths: ["src/main/resources/db/**"]   # empty = project-wide
+origin: {feature: 03-cancel-booking, phase: it, evidence: ["commit 8f2a1c3"]}
+seen_in: [03-cancel-booking, 05-refunds]
+---
+## Rule
+Run migrations in the shared fixture's `@BeforeAll`, never per-test.
+```
+
+**This is not documentation — it binds.** `kivax-plan`, `kivax-tdd`, and `kivax-it` each run `kivax lessons relevant --phase <p>` *before* producing anything, and the plan has to answer for every applicable lesson under `## Lessons applied`:
+
+```markdown
+## Lessons applied
+- LSN-0007 — migrations moved into the shared test fixture's @BeforeAll.
+- LSN-0002 — not applicable: this feature adds no scheduled job.
+```
+
+`kivax lessons check` computes which lessons apply (the project-wide ones, plus the path-scoped ones whose globs match the branch diff or a path named in `plan.md`) and **fails when one isn't answered for**. The trace-auditor runs it as part of the audit gate. A lesson can be dismissed; it cannot be dismissed silently.
+
+Three rules keep the store from rotting into noise:
+
+- **Reinforce, don't duplicate.** The same problem hitting a second feature appends to `seen_in` and sharpens the rule — it never becomes a second lesson.
+- **Retire, don't delete.** A lesson that stopped being true gets `status: retired` with a `superseded_by` or a `retired_reason`. Deleting the file loses the record that it was ever true.
+- **Zero lessons is a valid cycle.** Every applicable lesson is read by every future planner, so each worthless entry buys inattention to the good ones. Padding the store is the one way to destroy it.
+
+A lesson is **never** a substitute for a requirement. If what the retro found is unspecified *behavior*, it's a `GAP:` and it goes through `kivax-evolve` into the spec — the lessons store is not a back door around spec-first.
+
+**Adopting this on a project installed before the phase existed** is a manual edit (`kivax upgrade` copies the new skill and agent in, but never rewrites `config.yml`):
+
+```yaml
+pipeline: [constitution, architecture, spec, compile, plan, tdd, it, audit, retro]
+paths:
+  lessons: specs/lessons
+gates:
+  retro: human
+```
+
+---
+
 ## Extending the pipeline (custom phases)
 
 The phase sequence is data: the `pipeline` list in `.kivax/config.yml`. You can **add, remove, or reorder** phases — including entirely custom ones — by editing that list. Two invariants are enforced and not configurable: **`spec, compile` must appear consecutively**, and **only `constitution`/`architecture` may precede them**. Those two are what makes the flow spec-anchored; `kivax state` and `kivax doctor` reject any pipeline that puts a custom phase ahead of them.
@@ -268,8 +320,8 @@ Kivax doesn't model what your phase does — environments, deploy targets, and t
 ~/.kivax/                              (global store, one per machine — the "upstream")
   agents/<name>.md                     (canonical: description + tools + body — one file per
                                          specialist, PLUS orchestrator.md, shared by every runtime)
-  runtime/skills/                      (shared by all 6 runtimes — 4 reference skills +
-                                         13 phase-driver skills, e.g. kivax-spec/, kivax-plan/)
+  runtime/skills/                      (shared by all 6 runtimes — 5 reference skills +
+                                         14 phase-driver skills, e.g. kivax-spec/, kivax-plan/)
   lib/kivax_*.py                       (scripts, invoked via the CLI)
   lib/agent_runtimes.yml               (per-runtime agent frontmatter recipe)
   lib/kivax_agents.py                  (renders agents/*.md + agent_runtimes.yml into each
@@ -304,6 +356,7 @@ your-project/                          (all committed to git, no exceptions)
     02-cancel-booking/
       spec.md / spec.yml / plan.md
     wiki/                    # project-wide, spans features
+    lessons/                 # LSN-NNNN-*.md — what past iterations cost
 ```
 
 SKILL.md content is identical across every runtime — only the destination directory changes.
@@ -369,6 +422,7 @@ You'll rarely type these — the assistant runs most of them for you. The ones y
 | `kivax trace [--report-only\|--update-lock\|--json]` | Traceability audit across every feature: coverage, freshness, orphans. Exit 1 if NOT PASSING |
 | `kivax state <show\|set-phase\|set-req\|sync-reqs\|gate\|next>` | Phase and per-requirement status of the active feature |
 | `kivax wiki <lint\|stale> [--strict] [--json]` | Wiki provenance checks |
+| `kivax lessons <list\|show\|new\|relevant\|check\|lint>` | The lessons store. `relevant --phase <p>` is what a phase reads; `check` is what the audit enforces (exit 1 = an applicable lesson isn't answered for in `plan.md`) |
 | `kivax specfirst [--json] [--base <branch>]` | Classify the branch diff into tests / kivax / legacy / production |
 
 `--runtime` accepts `claude`, `opencode`, `cursor`, `vscode-copilot`, `copilot-cli`, or `codex`.
@@ -454,11 +508,12 @@ share/
                        coordinator, rendered like every other agent and additionally
                        stripped of frontmatter to produce AGENTS.md / CLAUDE.md /
                        copilot-instructions.md. Nothing here is copied verbatim.
-  runtime/skills/     4 reference skills + 13 phase-driver skills, shared by all 6
+  runtime/skills/     5 reference skills + 14 phase-driver skills, shared by all 6
                        runtimes (just placed in each one's own skills directory)
   lib/                kivax_*.py scripts the CLI dispatches to, the stack-profile catalog,
                        agent_runtimes.yml, and kivax_agents.py (the renderer)
-  templates/          Starting scaffolds (spec, plan, constitution, architecture, state, PR)
+  templates/          Starting scaffolds (spec, plan, constitution, architecture, lesson,
+                       state, PR)
   examples/           Ready-to-copy extensions, e.g. custom-phases (deploy + regression)
   ci/                 Sample CI gate workflow
 ```

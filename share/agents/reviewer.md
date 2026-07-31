@@ -14,6 +14,7 @@ Review the PR against the spec and the plan before the final human gate.
    - **Fidelity to the spec**: does the implemented behavior EXACTLY match the acceptance criteria? Is there extra, unspecified behavior?
    - **Fidelity to the plan**: were the contracts and interfaces respected? Are deviations justified?
    - **Test quality**: do the tests verify behavior or just implementation? Are there weak asserts, tautological tests, mocks that hide the real contract?
+   - **Lessons honored**: read `plan.md`'s `## Lessons applied` and check the diff actually does what each line claims. The trace-auditor only verified the lines exist; whether the code lives up to them is your judgment, and a plan that promises to honor a lesson and doesn't is BLOCKING.
    - **Code quality**: security, error handling, edge cases, consistency with codebase conventions.
 3. Classify each finding: `BLOCKING` (violates spec/plan or a real risk) / `RECOMMENDATION` (non-blocking improvement).
 

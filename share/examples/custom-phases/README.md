@@ -20,14 +20,18 @@ like any built-in phase.
    ```
 2. Edit `.kivax/config.yml`:
    ```yaml
-   pipeline: [spec, compile, plan, tdd, it, audit, deploy, regression]
+   pipeline: [spec, compile, plan, tdd, it, audit, deploy, regression, retro]
    gates:
      # ...existing gates...
      deploy: human        # recommended: shipping is destructive
      regression: auto
    ```
+   `retro` stays last on purpose: it records what the whole iteration cost, and
+   a deploy or a regression run is exactly where some of the most expensive
+   lessons come from.
 3. That's it — after `audit` passes, the orchestrator will continue into the
-   `kivax-deploy` and `kivax-regression` skills per their gates. Adapt the
+   `kivax-deploy` and `kivax-regression` skills per their gates, then into
+   `kivax-retro`. Adapt the
    persona sections inside each SKILL.md to your real deploy/test commands
    (they ship with placeholders).
 
