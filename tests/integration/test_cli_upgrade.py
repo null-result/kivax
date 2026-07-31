@@ -1,4 +1,6 @@
 """Integration tests for `kivax upgrade` (bin/kivax's cmd_upgrade)."""
+import json
+
 import pytest
 import yaml
 
@@ -6,6 +8,45 @@ pytestmark = pytest.mark.integration
 
 SKILL_PATH = ".claude/skills/kivax-spec/SKILL.md"
 STORE_SKILL_REL = "runtime/skills/kivax-spec/SKILL.md"
+
+
+# --------------------------------------------------------------------------- manifest portability
+# .kivax/sync.json is committed to git, so its keys have to mean the same thing
+# on every teammate's machine. They used to come from str(Path), which is
+# OS-dependent: a manifest written on Windows carried '\' keys that matched
+# nothing on a Linux checkout, and every managed file then read as untracked.
+def test_manifest_keys_are_always_posix(kivax_cli, project, use_store, repo_dir, call):
+    call(kivax_cli.main, "upgrade")
+    manifest = json.loads((repo_dir / ".kivax/sync.json").read_text())
+    assert manifest, "expected a populated manifest"
+    offenders = [k for k in manifest if "\\" in k]
+    assert not offenders, f"OS-specific separators leaked into the manifest: {offenders}"
+
+
+def test_legacy_backslash_manifest_is_normalized_on_load(kivax_cli, project, repo_dir):
+    """A sync.json written by a pre-fix Windows install must still resolve, so
+    the repair needs no migration step from the user."""
+    (repo_dir / ".kivax/sync.json").write_text(
+        json.dumps({r".claude\skills\kivax-spec\SKILL.md": "sha256:deadbeef"}))
+    assert kivax_cli.load_manifest(repo_dir) == {SKILL_PATH: "sha256:deadbeef"}
+
+
+def test_windows_written_manifest_does_not_cause_a_spurious_conflict(
+        kivax_cli, project, use_store, repo_dir, call, capsys):
+    """The end-to-end symptom, on a file the user customized while upstream
+    stayed put. Read correctly, that's a no-op (h_up == h_synced). With the
+    keys taken at face value the entry is invisible, so the file reads as
+    untracked-and-differing — a conflict the user never caused."""
+    manifest = json.loads((repo_dir / ".kivax/sync.json").read_text())
+    assert SKILL_PATH in manifest
+    (repo_dir / SKILL_PATH).write_text("---\nname: kivax-spec\n---\nMy own edit.\n")
+    (repo_dir / ".kivax/sync.json").write_text(
+        json.dumps({k.replace("/", "\\"): v for k, v in manifest.items()}))
+
+    capsys.readouterr()
+    assert call(kivax_cli.main, "upgrade") == 0
+    out = capsys.readouterr().out
+    assert "Conflicts: 0" in out or "Conflicts" not in out, out
 
 
 def test_added_file_from_a_newer_store(kivax_cli, project, use_store, repo_dir, call, capsys):

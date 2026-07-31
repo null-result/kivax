@@ -74,6 +74,13 @@ def test_copy_tree_recurses_and_skips_cache_dirs(kivax_install, tmp_path):
 
 
 # --------------------------------------------------------------------------- make_executable
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows filesystems have no executable bit: os.chmod there only toggles "
+           "read-only, so S_IXUSR can never land no matter what make_executable does. "
+           "Skipped because the assertion is unrepresentable on the platform, not "
+           "because the code is wrong — the 'nt' branch is covered by the next test.",
+)
 def test_make_executable_posix(kivax_install, tmp_path, monkeypatch):
     monkeypatch.setattr(kivax_install.os, "name", "posix")
     p = tmp_path / "script"
