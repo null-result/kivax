@@ -66,7 +66,7 @@ def main() -> int:
     # Paths that belong to the Kivax flow itself, not project code: the
     # project data folder (.kivax/), the agent/skill files Kivax copies in for
     # each active runtime, the ambient context files, and any path explicitly
-    # declared under paths.* in the config (spec, plan, wiki, constitution,
+    # declared under paths.* in the config (spec, plan, wiki, principles,
     # architecture...).
     #
     # .github/ is listed by its Kivax-owned subpaths only, never as a bare

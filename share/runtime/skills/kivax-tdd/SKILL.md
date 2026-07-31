@@ -17,6 +17,8 @@ Whichever role you're playing in a given step, never write tests or code from th
 ---
 ## Specialist persona: Test Writer
 
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
+
 You are the **Test Writer** of the spec-anchored SDD flow.
 
 ### Your only mission
@@ -40,6 +42,8 @@ Red test files + report: REQ→tests-created mapping, gaps detected.
 
 ---
 ## Specialist persona: Implementer
+
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
 
 You are the **Implementer** of the spec-anchored SDD flow.
 

@@ -23,7 +23,11 @@ Usage:
                              becomes the default for future projects.
   kivax doctor               Diagnose the current project's installation.
   kivax version               Version of the installed global store.
-  kivax validate|hash|trace|state|wiki|specfirst [args...]
+  kivax task <add|list|set|next|clear> [args]
+                             Per-agent task lists for the active feature, so an
+                             interrupted session resumes mid-agent instead of
+                             redoing the phase. 'list' shows the resume point.
+  kivax validate|hash|trace|state|task|wiki|specfirst [args...]
                               Passes control to the matching script.
 
 KIVAX_HOME (default ~/.kivax) must point to the global store created by
@@ -81,7 +85,7 @@ def regenerate_agents() -> None:
         AGENT_CACHE_BODY.parent.mkdir(parents=True, exist_ok=True)
         AGENT_CACHE_BODY.write_text(body.lstrip("\n"), encoding="utf-8")
 
-PASSTHROUGH = {"validate", "hash", "trace", "state", "wiki", "specfirst"}
+PASSTHROUGH = {"validate", "hash", "trace", "state", "task", "wiki", "specfirst"}
 
 # (key, human label, default answer) — key is what ends up in .kivax/config.yml's
 # 'runtimes' list and every runtime-keyed dict in this file. 'vscode-copilot' and
@@ -260,7 +264,7 @@ def sync_pairs(runtimes: list[str]) -> list[tuple[Path, Path]]:
     if {"claude", "opencode", "cursor", "copilot-cli", "codex"} & runtimes_set:
         pairs.append((Path("AGENTS.md"), AGENT_CACHE_BODY))
 
-    # Skills: 4 shared reference skills + 13 phase-driver skills, copied
+    # Skills: 5 shared reference skills + 13 phase-driver skills, copied
     # unchanged into every active runtime's own skills directory.
     skill_dest_dirs: list[Path] = []
     if "claude" in runtimes:
@@ -346,8 +350,8 @@ def cmd_init(argv: list[str]) -> int:
     greenfield = ask_yesno("Is this a greenfield project (no meaningful existing code)?",
                            heuristic_greenfield)
 
-    include_constitution_architecture = ask_yesno(
-        "\nInclude the constitution and architecture phases? (a one-time CONSTITUTION.md "
+    include_principles_architecture = ask_yesno(
+        "\nInclude the principles and architecture phases? (a one-time PRINCIPLES.md "
         "with the project's non-negotiable principles, and an ARCHITECTURE.md kept current "
         "as the project evolves — recommended)", True)
 
@@ -469,12 +473,12 @@ def cmd_init(argv: list[str]) -> int:
         "spec": "human", "compile": "human", "plan": "human",
         "tdd": "auto", "it": "auto", "audit": "human", "evolve": "human",
     }
-    if include_constitution_architecture:
-        pipeline = ["constitution", "architecture"] + pipeline
+    if include_principles_architecture:
+        pipeline = ["principles", "architecture"] + pipeline
         # Root-level, like README.md — whole-project artifacts, not per-feature.
-        paths["constitution"] = "CONSTITUTION.md"
+        paths["principles"] = "PRINCIPLES.md"
         paths["architecture"] = "ARCHITECTURE.md"
-        gates["constitution"] = "human"
+        gates["principles"] = "human"
         gates["architecture"] = "human"
 
     cfg = {
@@ -490,7 +494,7 @@ def cmd_init(argv: list[str]) -> int:
         # (custom ones too: add a kivax-<phase> skill to your active
         # runtime(s)' skills dir(s), and an agent file only for runtimes that
         # support one — they're plain project files, edit them like anything
-        # else). 'spec' and 'compile' are mandatory; only 'constitution'
+        # else). 'spec' and 'compile' are mandatory; only 'principles'
         # and/or 'architecture' may precede them; 'done' is implicit and terminal.
         "pipeline": pipeline,
         "paths": paths,
@@ -529,7 +533,7 @@ def cmd_init(argv: list[str]) -> int:
 
 Next step: open your assistant in this project and ask it to start a new feature (the 'kivax-new' skill).
 That creates {specs_dir}/01-<slug>/ with its own spec.md. You can also run 'kivax feature new <slug>' yourself.
-{"The first feature will start with the constitution and architecture phases, since CONSTITUTION.md/ARCHITECTURE.md don't exist yet." if include_constitution_architecture else ""}
+{"The first feature will start with the principles and architecture phases, since PRINCIPLES.md/ARCHITECTURE.md don't exist yet." if include_principles_architecture else ""}
 {"To migrate a legacy zone before touching it, ask your assistant to document the current behavior of <module> (the 'kivax-spec' skill)." if not greenfield else ""}
 """)
     return 0
@@ -1112,7 +1116,7 @@ def cmd_doctor(argv: list[str]) -> int:
     # Only required when the project actually opted into these phases —
     # opted-out configs shouldn't get a spurious error.
     configured_pipeline = cfg.get("pipeline") or []
-    for phase in ("constitution", "architecture"):
+    for phase in ("principles", "architecture"):
         if phase in configured_pipeline:
             required_path_keys.append(phase)
     for key in required_path_keys:

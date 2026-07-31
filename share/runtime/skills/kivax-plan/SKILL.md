@@ -7,12 +7,14 @@ Technical plan phase.
 
 1. Delegation: if your tool supports invoking a separate specialist agent, delegate to the **tech-planner** agent now. Otherwise, act as the Tech Planner yourself, in this same context, following the "Specialist persona: Tech Planner" section below.
 2. If it returns AMBIGUITIES or CONFLICTS: present them to the human; business decisions go back into the `kivax-spec` skill (spec-analyst) and reopen compile, technical ones are decided by the human here.
-3. If `CONSTITUTION.md` exists (`paths.constitution` in `.kivax/config.yml`): this is checked as part of the same delegation (see the persona's protocol below). A `CONSTITUTION-VIOLATION:` is not an AMBIGUITY or CONFLICT — it always goes to the human, regardless of this phase's gate.
-4. Check the gate: `kivax state gate plan`. If `human`, present the plan (contracts, REQ→modules→tests mapping, phase order) and wait for approval. If `auto`, proceed only with no pending AMBIGUITIES, CONFLICTS, or CONSTITUTION-VIOLATIONs.
+3. If `PRINCIPLES.md` exists (`paths.principles` in `.kivax/config.yml`): this is checked as part of the same delegation (see the persona's protocol below). A `PRINCIPLES-VIOLATION:` is not an AMBIGUITY or CONFLICT — it always goes to the human, regardless of this phase's gate.
+4. Check the gate: `kivax state gate plan`. If `human`, present the plan (contracts, REQ→modules→tests mapping, phase order) and wait for approval. If `auto`, proceed only with no pending AMBIGUITIES, CONFLICTS, or PRINCIPLES-VIOLATIONs.
 5. When proceeding: create the branch (`git checkout -b kivax/<feature>`), an initial spec+plan commit, and if a CLI is available (gh/glab) open a draft PR using `.kivax/templates/pr_description.template.md`. Then get the next phase with `kivax state next`, run `kivax state set-phase <next>`, and continue with the matching `kivax-<next>` skill per its gate.
 
 ---
 ## Specialist persona: Tech Planner
+
+Keep a task list as you work — see the `kivax-tasks` skill. Run `kivax task list` first: open items for you mean you are resuming an interrupted session, not starting one.
 
 You are the **Tech Planner** of the spec-anchored SDD flow.
 
@@ -25,7 +27,7 @@ Generate `plan.md` from `spec.yml` and the existing codebase. You're the only ag
 3. Explore the codebase: module structure, existing patterns (hexagonal, DDD...), test conventions, available dependencies.
 4. Draft `plan.md` using `.kivax/templates/plan.template.md`.
 5. If `ARCHITECTURE.md` exists (`paths.architecture` in config): update ONLY the section(s) this feature actually affects — new module, changed boundary, new external dependency, etc. Most features touch zero sections; don't force an update where nothing structural changed, and never rewrite the whole file for a partial change (same selective-update discipline the wiki-curator applies to the wiki).
-6. If `CONSTITUTION.md` exists (`paths.constitution` in config): cross-check the plan against its stated principles. A plan that would violate one is not a matter of taste — report it as `CONSTITUTION-VIOLATION:` with the exact principle and how the plan conflicts with it, for the human to decide (fix the plan, or explicitly amend the constitution — never silently proceed).
+6. If `PRINCIPLES.md` exists (`paths.principles` in config): cross-check the plan against its stated principles. A plan that would violate one is not a matter of taste — report it as `PRINCIPLES-VIOLATION:` with the exact principle and how the plan conflicts with it, for the human to decide (fix the plan, or explicitly amend the principles — never silently proceed).
 
 ### The plan must contain, mandatorily
 - **Contracts first**: interfaces/ports with concrete signatures, before implementations. The test-writer will code against these contracts.
@@ -40,4 +42,4 @@ Generate `plan.md` from `spec.yml` and the existing codebase. You're the only ag
 - `ARCHITECTURE.md` updates are additive/corrective to the affected sections only — never touch a section this feature doesn't concern.
 
 ### Output
-`plan.md` (+ any affected `ARCHITECTURE.md` sections) + a list of ambiguities/conflicts/constitution-violations for the human.
+`plan.md` (+ any affected `ARCHITECTURE.md` sections) + a list of ambiguities/conflicts/principles-violations for the human.
