@@ -69,33 +69,46 @@ def test_yaml_scalar_plain(kagents):
 
 # --------------------------------------------------------------------------- _computed
 def test_computed_readonly_true_without_write_or_edit(kagents):
-    assert kagents._computed("readonly", "n", {"tools": "Read, Grep"}) == "readonly: true"
+    assert kagents._computed("readonly", {"tools": "Read, Grep"}, None) == "readonly: true"
 
 
 def test_computed_readonly_false_with_write(kagents):
-    assert kagents._computed("readonly", "n", {"tools": "Read, Write"}) == "readonly: false"
+    assert kagents._computed("readonly", {"tools": "Read, Write"}, None) == "readonly: false"
 
 
 def test_computed_opencode_tools_none_when_all_present(kagents):
-    assert kagents._computed("opencode_tools", "n", {"tools": "Read, Write, Edit, Bash"}) is None
+    assert kagents._computed("opencode_tools", {"tools": "Read, Write, Edit, Bash"}, None) is None
 
 
 def test_computed_opencode_tools_lists_missing(kagents):
-    line = kagents._computed("opencode_tools", "n", {"tools": "Read, Write"})
+    line = kagents._computed("opencode_tools", {"tools": "Read, Write"}, None)
     assert line == "tools:\n  edit: false\n  bash: false"
 
 
 def test_computed_model_default_when_unset(kagents):
-    assert kagents._computed("model:auto", "n", {}) == "model: auto"
+    assert kagents._computed("model:auto", {}, None) == "model: auto"
 
 
 def test_computed_model_uses_fm_override(kagents):
-    assert kagents._computed("model:auto", "n", {"model": "opus"}) == "model: opus"
+    assert kagents._computed("model:auto", {"model": "opus"}, None) == "model: opus"
+
+
+def test_computed_model_config_beats_the_agents_own_suggestion(kagents):
+    assert kagents._computed("model:auto", {"model": "opus"}, "haiku") == "model: haiku"
+
+
+def test_computed_model_omitted_when_runtime_has_no_inherit_word(kagents):
+    """opencode has no literal for 'use the session model', so the field goes."""
+    assert kagents._computed("model:", {}, None) is None
+
+
+def test_computed_model_emitted_on_opencode_when_configured(kagents):
+    assert kagents._computed("model:", {}, "opus") == "model: opus"
 
 
 def test_computed_unknown_spec_raises(kagents):
     with pytest.raises(ValueError, match="Unknown computed field spec"):
-        kagents._computed("bogus", "n", {})
+        kagents._computed("bogus", {}, None)
 
 
 # --------------------------------------------------------------------------- render
@@ -126,6 +139,23 @@ def test_render_unknown_field_source_raises(kagents):
         kagents.render("n", {}, "\n", bad_cfg)
 
 
+# --------------------------------------------------------------------------- models
+def test_generate_all_bakes_the_configured_model_in(kagents, tmp_path):
+    src, cache = tmp_path / "agents", tmp_path / "cache"
+    src.mkdir()
+    (src / "implementer.md").write_text('---\ndescription: "D"\ntools: Read\n---\n\nBody\n')
+    kagents.generate_all(src, {"claude": CLAUDE_CFG}, cache, {"implementer": "opus"})
+    assert "model: opus" in (cache / "claude" / "implementer.md").read_text()
+
+
+def test_generate_all_falls_back_to_the_runtime_default(kagents, tmp_path):
+    src, cache = tmp_path / "agents", tmp_path / "cache"
+    src.mkdir()
+    (src / "implementer.md").write_text('---\ndescription: "D"\ntools: Read\n---\n\nBody\n')
+    kagents.generate_all(src, {"claude": CLAUDE_CFG}, cache, {})
+    assert "model: inherit" in (cache / "claude" / "implementer.md").read_text()
+
+
 # --------------------------------------------------------------------------- generate_all
 def test_generate_all_writes_and_prunes_stale(kagents, tmp_path):
     src = tmp_path / "agents"
@@ -142,27 +172,3 @@ def test_generate_all_writes_and_prunes_stale(kagents, tmp_path):
     kagents.generate_all(src, runtimes_cfg, cache)
     assert not (cache / "claude" / "stale.md").exists()
     assert (cache / "claude" / "a.md").is_file()
-
-
-# --------------------------------------------------------------------------- update_canonical
-def test_update_canonical_new_file(kagents, tmp_path):
-    p = tmp_path / "new-agent.md"
-    text = kagents.update_canonical(p, description="D", tools="Read", body="\n\nBody\n")
-    assert "description: \"D\"" in text
-    assert text.endswith("Body\n")
-
-
-def test_update_canonical_partial_update_preserves_body(kagents, tmp_path):
-    p = tmp_path / "agent.md"
-    p.write_text('---\ndescription: "Old"\ntools: Read\n---\n\nOriginal body\n')
-    text = kagents.update_canonical(p, model="opus")
-    assert "description: \"Old\"" in text  # untouched
-    assert "model: opus" in text
-    assert text.endswith("Original body\n")
-
-
-def test_update_canonical_model_only(kagents, tmp_path):
-    p = tmp_path / "agent.md"
-    p.write_text('---\ndescription: "D"\n---\n\nBody\n')
-    text = kagents.update_canonical(p, model="opus")
-    assert "model: opus" in text

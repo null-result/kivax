@@ -180,28 +180,6 @@ def test_detect_base_branch_prefers_origin_head(kivax_cli, tmp_path, git):
     assert kivax_cli.detect_base_branch(clone) == "trunk"
 
 
-# --------------------------------------------------------------------------- file_hash
-def test_file_hash_is_stable_sha256(kivax_cli, tmp_path):
-    p = tmp_path / "f.txt"
-    p.write_bytes(b"hello")
-    import hashlib
-    expected = "sha256:" + hashlib.sha256(b"hello").hexdigest()
-    assert kivax_cli.file_hash(p) == expected
-
-
-# --------------------------------------------------------------------------- _kind_filename
-@pytest.mark.parametrize("kind,runtime,expected", [
-    ("skill", "claude", "kivax-spec/SKILL.md"),
-    ("skill", "opencode", "kivax-spec/SKILL.md"),
-    ("agent", "copilot-cli", "spec-analyst.agent.md"),
-    ("agent", "claude", "spec-analyst.md"),
-    ("agent", "cursor", "spec-analyst.md"),
-])
-def test_kind_filename(kivax_cli, kind, runtime, expected):
-    name = "kivax-spec" if kind == "skill" else "spec-analyst"
-    assert kivax_cli._kind_filename(kind, runtime, name) == expected
-
-
 # --------------------------------------------------------------------------- _looks_like_botched_feature
 def test_looks_like_botched_feature_leading_digit(kivax_cli, tmp_path):
     d = tmp_path / "1-booking"

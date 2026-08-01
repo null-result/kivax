@@ -32,8 +32,14 @@ def test_wiki_dir_default_fallback(kwiki, tmp_path):
     assert kwiki.wiki_dir(tmp_path, {}) == tmp_path / "specs/wiki"
 
 
-def test_wiki_dir_from_config(kwiki, tmp_path):
-    assert kwiki.wiki_dir(tmp_path, {"paths": {"wiki": "docs/wiki"}}) == tmp_path / "docs/wiki"
+def test_wiki_dir_derives_from_the_features_root(kwiki, tmp_path):
+    assert kwiki.wiki_dir(tmp_path, {"paths": {"features": "docs/spec"}}) == tmp_path / "docs/spec/wiki"
+
+
+def test_wiki_dir_ignores_a_stale_paths_wiki_key(kwiki, tmp_path):
+    """Configs written before Kivax owned its own layout still carry one."""
+    cfg = {"paths": {"features": "specs", "wiki": "somewhere/else"}}
+    assert kwiki.wiki_dir(tmp_path, cfg) == tmp_path / "specs/wiki"
 
 
 # --------------------------------------------------------------------------- main()

@@ -28,7 +28,7 @@ A lesson is grounded in **evidence you can point at**, never in your impression 
 7. Report: lessons created, lessons reinforced, lessons retired, and — explicitly — the candidates you **rejected** and why. That last list is the honest part of the job.
 
 ## Hard rules
-- **You never modify spec, plan, tests, code, or the wiki.** Only files under `paths.lessons`.
+- **You never modify spec, plan, tests, code, or the wiki.** Only files under `<paths.features>/lessons/`.
 - **A lesson is not a requirement.** If what you found is unspecified *behavior* the system should have, it is a `GAP:` — report it for `kivax-evolve` and do not stash it here. The lessons store is not a back door around spec-first.
 - **Every lesson needs an imperative, checkable `## Rule`.** "Be careful with X" is not a rule; "do X before Y" is.
 - **Prefer zero lessons to weak ones.** A clean cycle that taught nothing is a normal outcome and the correct report is "no lessons". Padding the store to look productive is the one way to destroy its value: the next planner reads every applicable lesson, and every worthless one buys inattention to the good ones.

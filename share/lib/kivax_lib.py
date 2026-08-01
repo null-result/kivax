@@ -70,11 +70,42 @@ def load_config(root: Path | None = None) -> tuple[Path, dict]:
     return root, cfg
 
 
+DEFAULT_FEATURES_ROOT = "specs"
+
+
+def paths_of(cfg: dict) -> dict[str, str]:
+    """Every path Kivax owns, as project-relative strings.
+
+    Only `paths.features` is configurable — where a project keeps its specs is
+    a real decision that varies (an existing repo may already have `docs/spec/`
+    spoken for). Everything else is derived from it or fixed by convention:
+    a project that put the wiki somewhere unexpected gained nothing and made
+    every doc, skill, and error message in the system wrong about itself.
+    """
+    features = str((cfg.get("paths", {}) or {}).get("features")
+                   or DEFAULT_FEATURES_ROOT).strip("/")
+    return {
+        "features": features,
+        # Siblings of the features root, not children of any one feature: both
+        # are project-wide. The wiki is derived from the specs (every claim
+        # traces to a REQ); the lessons store is what past iterations cost,
+        # which no REQ can ever anchor — hence two directories, not one.
+        "wiki": f"{features}/wiki",
+        "lessons": f"{features}/lessons",
+        "state": ".kivax/state.yml",
+        "lock": ".kivax/traceability.lock.json",
+        # Root-level, like README.md — whole-project artifacts, not per-feature.
+        "principles": "PRINCIPLES.md",
+        "architecture": "ARCHITECTURE.md",
+    }
+
+
 def path_of(root: Path, cfg: dict, key: str) -> Path:
     try:
-        return root / cfg["paths"][key]
+        return root / paths_of(cfg)[key]
     except KeyError:
-        sys.exit(f"ERROR: missing paths.{key} in .kivax/config.yml")
+        sys.exit(f"ERROR: '{key}' is not a path Kivax knows about. "
+                 f"Known: {', '.join(paths_of(cfg))}")
 
 
 def active_profiles(cfg: dict) -> list[dict]:
@@ -119,13 +150,7 @@ class Feature:
 
 
 def features_root(root: Path, cfg: dict) -> Path:
-    paths = cfg.get("paths", {}) or {}
-    if "features" not in paths:
-        sys.exit("ERROR: missing paths.features in .kivax/config.yml.\n"
-                 "Kivax keeps one spec per feature, in one directory each under that\n"
-                 "root (e.g. specs/01-booking/spec.yml). Add to .kivax/config.yml:\n"
-                 "  paths:\n    features: specs")
-    return root / paths["features"]
+    return root / paths_of(cfg)["features"]
 
 
 def list_features(root: Path, cfg: dict) -> list[Feature]:
@@ -314,46 +339,59 @@ def spec_hashes(spec: dict) -> dict:
     return out
 
 
-DEFAULT_PIPELINE = ["principles", "architecture", "spec", "compile", "plan", "tdd", "it",
-                    "audit", "retro"]
-MANDATORY_PREFIX = ["spec", "compile"]
-OPTIONAL_PRE_PHASES = {"principles", "architecture"}
+# The per-feature flow. Not configuration: Kivax owns the sequence, and every
+# phase in it runs for every feature. A project that could drop 'audit' or
+# reorder 'tdd' before 'plan' would still be called Kivax while making none of
+# the promises Kivax exists to make, so the list is code and there is no key to
+# override it. 'done' is the implicit terminal phase and is never listed here.
+PIPELINE = ["spec", "compile", "plan", "tdd", "it", "audit", "retro"]
 TERMINAL_PHASE = "done"
 
+# Project setup, done ONCE per repository — not phases of any feature.
+#
+# PRINCIPLES.md and ARCHITECTURE.md describe the project, not the thing being
+# built this week, so asking "does it exist yet?" at the head of every feature
+# was answering a question about the repo in the wrong place: it put two steps
+# in each feature's history that did nothing, and it made the flow look like it
+# had nine phases when seven of them are the actual work. Both documents are
+# authored once, before the first feature; ARCHITECTURE.md is then kept current
+# by the `plan` phase (which knows what the feature changed structurally), and
+# PRINCIPLES.md changes only on an explicit human request to amend it.
+#
+# Completion is the file existing on disk. There is deliberately no flag in
+# state.yml: a second source of truth could disagree with the filesystem, and
+# deleting PRINCIPLES.md should put setup back where it belongs — pending.
+SETUP_PHASES = ["principles", "architecture"]
 
-def pipeline_of(cfg: dict) -> list[str]:
-    """Returns the project's phase pipeline, validated.
 
-    The pipeline is data in .kivax/config.yml (`pipeline:` key); users can
-    append, remove, or reorder phases — including fully custom ones backed by
-    their own kivax-<phase> skill (and, for runtimes that support one, an
-    agent file too).
+def pending_setup(root: Path, cfg: dict) -> list[str]:
+    """The setup phases whose document doesn't exist yet, in order. Empty means
+    the project is ready for its first feature."""
+    paths = paths_of(cfg)
+    return [phase for phase in SETUP_PHASES if not (root / paths[phase]).is_file()]
 
-    Invariants enforced and NOT configurable:
-      - Only 'principles' and/or 'architecture' may precede ['spec',
-        'compile'] — both are optional, self-skipping setup phases (their
-        skill checks whether PRINCIPLES.md/ARCHITECTURE.md already exists
-        and, if so, advances immediately without doing anything). Whatever
-        comes after that optional leading run must start with
-        ['spec', 'compile']: they're what makes the flow spec-anchored.
-        Removing them isn't customizing the pipeline, it's removing the
-        system's guarantees.
-      - 'done' is the implicit terminal phase and can't appear in the list.
-    """
-    pl = cfg.get("pipeline") or list(DEFAULT_PIPELINE)
-    if not isinstance(pl, list) or not all(isinstance(x, str) and x for x in pl):
-        sys.exit("ERROR: 'pipeline' in .kivax/config.yml must be a list of phase names")
-    i = 0
-    while i < len(pl) and pl[i].strip() in OPTIONAL_PRE_PHASES:
-        i += 1
-    if [p.strip() for p in pl[i:i + 2]] != MANDATORY_PREFIX:
-        sys.exit("ERROR: after any leading 'principles'/'architecture' phases, the "
-                 "pipeline must continue with ['spec', 'compile'] — these phases "
-                 "are mandatory (they're what makes the flow spec-anchored). "
-                 "Current pipeline: " + str(pl))
-    if TERMINAL_PHASE in pl:
-        sys.exit(f"ERROR: '{TERMINAL_PHASE}' is the implicit terminal phase; "
-                 f"don't list it in 'pipeline'")
-    if len(pl) != len(set(pl)):
-        sys.exit("ERROR: duplicate phase names in 'pipeline': " + str(pl))
-    return pl
+# Who signs off on each phase. 'human' stops and waits for approval; 'auto'
+# advances on its own. Also fixed: the phases where a mistake is expensive and
+# hard to walk back (a wrong spec, a wrong plan, a passed audit) are the ones a
+# person has to see, and that judgment shouldn't depend on how patient the
+# person configuring the project was feeling.
+#
+# A gate delegates APPROVAL, never quality control: 'auto' on tdd/it means
+# nobody is asked to press enter, not that the phase may skip its own checks.
+# The setup phases and 'evolve' (the mid-flight spec-change flow) aren't in
+# PIPELINE, but they gate like phases when they run.
+GATES = {
+    "principles": "human", "architecture": "human", "spec": "human",
+    "compile": "human", "plan": "human", "tdd": "auto", "it": "auto",
+    "audit": "human", "retro": "human", "evolve": "human",
+}
+
+# Everything that legitimately names a phase — used where the vocabulary is
+# wider than the feature flow itself (a lesson can be learned during setup).
+KNOWN_PHASES = SETUP_PHASES + PIPELINE
+
+
+def gate_of(phase: str) -> str:
+    """'human' or 'auto' for a phase. Unknown phases gate to 'human': the
+    fail-safe answer is always the one that asks a person."""
+    return GATES.get(phase, "human")

@@ -20,14 +20,14 @@ from pathlib import Path
 
 import yaml
 
-from kivax_lib import all_spec_hashes, load_all_specs, load_config
+from kivax_lib import all_spec_hashes, load_all_specs, load_config, paths_of
 
 SOURCE_RE = re.compile(
     r"^(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})@(?P<hash>sha256:[0-9a-f]{16})$")
 
 
 def wiki_dir(root, cfg) -> Path:
-    return root / cfg.get("paths", {}).get("wiki", "specs/wiki")
+    return root / paths_of(cfg)["wiki"]
 
 
 def parse_frontmatter(text: str) -> dict | None:

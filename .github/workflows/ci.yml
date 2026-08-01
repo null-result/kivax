@@ -120,11 +120,18 @@ jobs:
           git init -q .
           git config user.email ci@example.invalid
           git config user.name CI
-          # runtimes(6, defaults) / greenfield=y / phases / features root /
-          # language / stack profile / base branch
-          printf '\n\n\n\n\n\ny\n\n\n\npython-pytest\n\n' | kivax init
+          # runtimes(6, defaults) / greenfield=y / features root / language /
+          # stack profile / base branch
+          printf '\n\n\n\n\n\ny\n\n\npython-pytest\n\n' | kivax init
           test -d specs
           test ! -f specs/spec.md   # no feature exists yet at init time
+          # Project setup is a precondition of the first feature, and it's the
+          # kivax-setup skill (i.e. an assistant) that writes these two. No
+          # assistant here, so assert the refusal, then stand in for it.
+          ! kivax feature new checkout
+          kivax feature new checkout 2>&1 | grep -q "hasn't been set up yet"
+          printf '# Principles\n' > PRINCIPLES.md
+          printf '# Architecture\n' > ARCHITECTURE.md
           kivax feature new checkout
           test -f specs/01-checkout/spec.md
           kivax doctor

@@ -7,7 +7,9 @@ Starts a new feature within the Kivax flow. Feature request: **$ARGUMENTS**
 
 Kivax keeps **one spec per feature**: each feature gets its own directory under `paths.features` (`specs/01-booking/`, `specs/02-cancel/`...) holding its own `spec.md`, `spec.yml`, and `plan.md`. The directory's number becomes the prefix of every id in that spec (`REQ-01-001`), which is what keeps ids unique project-wide.
 
-Precondition: the project is already installed (`.kivax/config.yml` exists; if not, the project hasn't been initialized — tell the human to run `kivax init` in a terminal, at the repo root, BEFORE continuing. That step is the human's responsibility, not yours: it requires a real terminal, don't simulate it).
+Preconditions, both checked by `kivax feature new` itself:
+- **Installed** — `.kivax/config.yml` exists. If not, tell the human to run `kivax init` in a terminal, at the repo root, BEFORE continuing. That step is the human's responsibility, not yours: it requires a real terminal, don't simulate it.
+- **Set up** — `PRINCIPLES.md` and `ARCHITECTURE.md` exist. If not, run the `kivax-setup` skill first; it writes them with the human, once for the whole project. Never write either document yourself just to unblock a feature, and never work around the error: the `plan` phase reads both.
 
 Steps (you run these directly, no delegation needed):
 1. Infer a short kebab-case slug from the request (`cancel-booking`, `bulk-export`). If it isn't clear, ask the human for one — don't invent something vague.

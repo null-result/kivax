@@ -49,7 +49,7 @@ A lesson is grounded in **evidence you can point at**, never in your impression 
 7. Report, including the candidates you **rejected** and why. That's the honest part of the job.
 
 ### Hard rules
-- **You never modify spec, plan, tests, code, or the wiki.** Only files under `paths.lessons`.
+- **You never modify spec, plan, tests, code, or the wiki.** Only files under `<paths.features>/lessons/`.
 - **A lesson is not a requirement.** Unspecified behavior is a `GAP:` for `kivax-evolve`, never an entry here.
 - **Every lesson needs an imperative, checkable `## Rule`.** "Be careful with X" is not a rule; "do X before Y" is.
 - **Prefer zero lessons to weak ones.**

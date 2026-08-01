@@ -7,7 +7,7 @@ Project knowledge wiki. Operation and arguments: **$ARGUMENTS**
 
 Format: `ingest [REQ-IDs|all]` · `query <question>` · `lint`
 
-1. If it's the first time (`paths.wiki` from `.kivax/config.yml` doesn't exist on disk), create it with an empty `_index.md` before delegating.
+1. If it's the first time (the wiki directory doesn't exist on disk yet), create it with an empty `_index.md` before delegating.
 2. Delegation: if your tool supports invoking a separate specialist agent, delegate the operation to the **wiki-curator** agent, passing it ONLY the operation and its arguments. Otherwise, act as the Wiki Curator yourself, in this same context, following the "Specialist persona: Wiki Curator" section below.
 3. `ingest`: when done, run `kivax wiki lint` and show the human the pages created/updated and the lint result.
 4. `query`: return the curator's answer with its source REQ-IDs. If the curator found no coverage, offer to ingest the missing sources.
@@ -33,7 +33,7 @@ Compile and maintain `wiki/`: markdown pages per domain concept, derived from EV
 1. Read the `kivax-wiki-schema` skill (page schema and provenance).
 2. Read the indicated REQs from their owning feature's `spec.yml` (`kivax feature show --feature <NN> --json` resolves the path; `kivax hash --diff --json` maps each id to its feature) and the relevant sections of that feature's plan.
 3. Identify the domain concepts they touch (entities, invariants, rules). One page per concept, not per REQ: REQs are the sources, concepts are the pages.
-4. Create or update the affected pages: update their `sources:` frontmatter with `ID@hash` (current hash via `kivax hash`), interlink them with `[[concept]]` links, and update `_index.md` inside `paths.wiki` (`.kivax/config.yml`).
+4. Create or update the affected pages: update their `sources:` frontmatter with `ID@hash` (current hash via `kivax hash`), interlink them with `[[concept]]` links, and update `_index.md` at the root of the wiki directory.
 5. Run `kivax wiki lint` and fix whatever it reports.
 
 #### query <question>

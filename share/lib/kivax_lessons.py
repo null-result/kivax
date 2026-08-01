@@ -48,10 +48,11 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from kivax_lib import (
+    KNOWN_PHASES,
     TERMINAL_PHASE,
     active_feature,
     load_config,
-    pipeline_of,
+    paths_of,
 )
 
 LESSON_ID_RE = re.compile(r"^LSN-\d{4}$")
@@ -69,14 +70,10 @@ PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_.\-/]+/[A-Za-z0-9_.\-/*]+|[A-Za-z0-9_.\-
 
 
 def lessons_dir(root: Path, cfg: dict) -> Path:
-    """Where the store lives. Defaults under the features root rather than
-    inside `.kivax/` because these are documents people read and review in a
-    PR, not flow bookkeeping."""
-    paths = cfg.get("paths", {}) or {}
-    if "lessons" in paths:
-        return root / paths["lessons"]
-    features = paths.get("features", "specs")
-    return root / features / "lessons"
+    """Where the store lives. Under the features root rather than inside
+    `.kivax/` because these are documents people read and review in a PR, not
+    flow bookkeeping."""
+    return root / paths_of(cfg)["lessons"]
 
 
 def _now_date() -> str:
@@ -308,9 +305,9 @@ def cmd_relevant(root: Path, cfg: dict, argv: list[str]) -> int:
     if "--phase" not in argv:
         sys.exit("Usage: kivax lessons relevant --phase <phase> [--paths a b ...] [--json]")
     phase = argv[argv.index("--phase") + 1] if len(argv) > argv.index("--phase") + 1 else ""
-    known = pipeline_of(cfg) + [TERMINAL_PHASE]
+    known = KNOWN_PHASES + [TERMINAL_PHASE]
     if phase not in known:
-        sys.exit(f"ERROR: '{phase}' is not a phase in this project's pipeline {known}.")
+        sys.exit(f"ERROR: '{phase}' is not a phase in the Kivax pipeline {known}.")
 
     paths: list[str] = []
     if "--paths" in argv:
@@ -413,7 +410,7 @@ def cmd_lint(root: Path, cfg: dict, argv: list[str]) -> int:
     an id that collides with another's, is worse than no lesson at all."""
     strict = "--strict" in argv
     entries = load_lessons(root, cfg)
-    known_phases = set(pipeline_of(cfg))
+    known_phases = set(KNOWN_PHASES)
     problems: list[str] = []
     seen: dict[str, str] = {}
     ids = {(e["fm"] or {}).get("id") for e in entries if e["fm"]}
@@ -447,7 +444,7 @@ def cmd_lint(root: Path, cfg: dict, argv: list[str]) -> int:
         else:
             for p in phases:
                 if p not in known_phases:
-                    problems.append(f"{rel}: phase '{p}' is not in this project's pipeline")
+                    problems.append(f"{rel}: phase '{p}' is not in the Kivax pipeline")
         origin = fm.get("origin") or {}
         if not isinstance(origin, dict) or not origin.get("feature"):
             problems.append(f"{rel}: 'origin.feature' is required — a lesson with no "

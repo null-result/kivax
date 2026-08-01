@@ -18,7 +18,7 @@ Two knowledge artifacts, two different questions:
 A lesson has **no REQ behind it** — that's precisely why it can't live in the wiki, whose one non-negotiable rule is that everything on a page traces to a requirement. If something you're about to write as a lesson is really unspecified *behavior*, it isn't a lesson: it's a `GAP:`, and it goes through `kivax-evolve` into the spec.
 
 ## One lesson per file
-Under `paths.lessons` (default `<paths.features>/lessons/`), named `LSN-NNNN-<slug>.md`.
+Under `<paths.features>/lessons/`, named `LSN-NNNN-<slug>.md`.
 
 **Ids are allocated by `kivax lessons new <slug>`, never by hand.** Two lessons sharing an id would make every `## Lessons applied` reference in every plan ambiguous, and nothing downstream would notice.
 
