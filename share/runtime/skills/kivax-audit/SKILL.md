@@ -8,7 +8,32 @@ Traceability gate and final review.
 1. Delegation: if your tool supports invoking a separate specialist agent, delegate to **trace-auditor** now. Otherwise, act as the Traceability Auditor yourself, in this same context, following the "Specialist persona: Traceability Auditor" section below. Either way, the PASSING/NOT PASSING verdict is *computed* by `kivax trace`, never judged by reasoning about the diff — the auditor's job is to run that script and interpret/route its output, not re-derive its answer. If NOT PASSING: route each violation to the agent the auditor suggests, and repeat the audit when done. There's no "passing with observations". A `PRINCIPLES-VIOLATION:` (see the persona's protocol) is separate from the PASSING/NOT PASSING verdict and always goes to the human regardless of it.
 2. On PASSING: delegation: if your tool supports invoking a separate specialist agent, delegate to **reviewer** (clean context: only diff + spec.yml + plan.md). Otherwise, act as the Reviewer yourself following the "Specialist persona: Reviewer" section below.
 3. Check `kivax state gate audit`. With `human` (recommended), present the auditor's verdict + the reviewer's report + any principles violations and wait for approval. With `auto`, only proceed if the auditor gave PASSING, the reviewer left NO BLOCKING findings, and there are NO principles violations — any of these is an exception and stops the flow regardless, to be routed (uncovered spec → the `kivax-evolve` skill; code → implementer via a mini TDD cycle for the affected REQ, through the `kivax-tdd` skill; principles violation → the human decides whether to fix the change or amend the principles).
-4. When proceeding: mark the PR as ready (remove draft status, update the description with the reviewer's summary). Then `kivax state next`, which prints `retro` — `set-phase` it and continue with the `kivax-retro` skill per its gate, which is where this cycle's hard-won knowledge gets written down before everyone forgets it. If it prints `done`, run `kivax state set-phase done` and finish — the human or CI runs the merge and the deploy.
+4. When proceeding: hand the pull request over for review — see "Handing over the pull request" below. Then `kivax state next`, which prints `retro` — `set-phase` it and continue with the `kivax-retro` skill per its gate, which is where this cycle's hard-won knowledge gets written down before everyone forgets it. If it prints `done`, run `kivax state set-phase done` and finish. **You never merge**: the human does, when they're satisfied with the review (the `kivax-git` skill assists, only if they ask for it).
+
+---
+## Handing over the pull request
+
+This is the flow's deliverable: a pull request a human can review and merge. Before marking it ready, make sure it actually contains the work.
+
+```bash
+git status --porcelain          # must be empty — nothing uncommitted
+git push                        # everything local is now on the branch
+gh pr view --json number,state,isDraft   # the PR this branch opened
+```
+
+If `git status` isn't clean, the audit you just ran covered a working tree the reviewer will never see. Commit what belongs to the feature (or say what's left over) before continuing — don't mark ready over uncommitted work.
+
+If no PR exists for the branch, the plan phase couldn't create one (usually no `gh`/`glab`). Say so and stop: opening it now, after the fact, is fine — but the human should know the flow ran without one.
+
+Then:
+
+```bash
+gh pr ready                     # drop draft status
+gh pr edit --body-file <updated>   # reviewer's summary into the description
+# GitLab: glab mr update <id> --ready --description ...
+```
+
+Leave it there. Marking ready is the handover; the review and the merge are the human's.
 
 ---
 ## Specialist persona: Traceability Auditor

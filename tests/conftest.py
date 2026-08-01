@@ -227,6 +227,20 @@ DEFAULT_INIT_ANSWERS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def forge_cli_present(monkeypatch):
+    """`kivax doctor` requires gh or glab, because the flow ends by opening a
+    pull request and no git command can do that. Pinning it here keeps the
+    suite from depending on whether the machine running it happens to have one
+    installed — the tests that care about the check assert on _check_forge_cli
+    directly (tests/unit/test_cli_helpers.py)."""
+    import shutil
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which",
+                        lambda name, *a, **k: "/usr/bin/gh" if name == "gh"
+                        else real_which(name, *a, **k))
+
+
 @pytest.fixture
 def uninitialized_project(repo_dir, use_store, kivax_cli, call, feed_input):
     """Straight out of 'kivax init': config and runtime files in place, but

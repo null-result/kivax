@@ -180,6 +180,53 @@ def test_detect_base_branch_prefers_origin_head(kivax_cli, tmp_path, git):
     assert kivax_cli.detect_base_branch(clone) == "trunk"
 
 
+# Kivax's flow is gitflow's feature branch, so it has to target the INTEGRATION
+# branch. origin/HEAD points at the published one — on a gitflow repo that's
+# the release branch, and a feature PR against it would target production.
+def test_detect_base_branch_prefers_local_develop(kivax_cli, repo_dir, git):
+    git(repo_dir, "commit", "-q", "--allow-empty", "-m", "root")  # a branch needs one
+    git(repo_dir, "branch", "develop")
+    assert kivax_cli.detect_base_branch(repo_dir) == "develop"
+
+
+def test_detect_base_branch_prefers_develop_over_origin_head(kivax_cli, tmp_path, git):
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    git(bare, "init", "-q", "--bare")
+    git(bare, "symbolic-ref", "HEAD", "refs/heads/main")
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", "-q", str(bare), str(clone))
+    git(clone, "config", "user.email", "test@example.invalid")
+    git(clone, "config", "user.name", "Test")
+    git(clone, "commit", "-q", "--allow-empty", "-m", "root")
+    git(clone, "branch", "develop")
+    assert kivax_cli.detect_base_branch(clone) == "develop"
+
+
+def test_branch_prefix_is_gitflows_own(kivax_cli):
+    assert kivax_cli.BRANCH_PREFIX == "feature/"
+
+
+# --------------------------------------------------------------------------- _check_forge_cli
+# A pull request is a forge concept, not a git one: no git command creates one,
+# so the flow's "ends in a reviewable PR" contract needs gh or glab.
+def test_forge_cli_missing_is_reported(kivax_cli, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    problems = kivax_cli._check_forge_cli()
+    assert len(problems) == 1
+    assert "gh" in problems[0] and "glab" in problems[0]
+
+
+def test_forge_cli_present_is_silent(kivax_cli, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/gh" if name == "gh" else None)
+    assert kivax_cli._check_forge_cli() == []
+
+
+def test_glab_alone_satisfies_the_check(kivax_cli, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/glab" if name == "glab" else None)
+    assert kivax_cli._check_forge_cli() == []
+
+
 # --------------------------------------------------------------------------- _looks_like_botched_feature
 def test_looks_like_botched_feature_leading_digit(kivax_cli, tmp_path):
     d = tmp_path / "1-booking"

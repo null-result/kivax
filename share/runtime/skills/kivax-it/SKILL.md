@@ -7,7 +7,7 @@ Integration test phase.
 
 1. Delegation: if your tool supports invoking a separate specialist agent, delegate to **test-writer** the `integration_scenarios` from spec.yml (verified red if the scenario doesn't hold yet, or run directly if the implementation should already cover them). Otherwise, act as the Test Writer yourself following the "Specialist persona: Test Writer" section below.
 2. Run the IT suite with the `cmd_test_it` commands of every active profile in `.kivax/config.yml` (in a monorepo, backend and frontend separately). If there are reds caused by code: delegate the affected REQ to **implementer** (or act as the Implementer yourself, per the "Specialist persona: Implementer" section below). If there are reds from badly-derived scenario tests: back to step 1 (test-writer).
-3. With everything green: commit. Check `kivax state gate it`: with `auto`, get the next phase (`kivax state next`), `set-phase` it, and chain into the matching `kivax-<next>` skill without stopping; with `human`, present the IT summary and wait for approval.
+3. With everything green: commit, then `git push` so the pull request carries the integration tests too. Check `kivax state gate it`: with `auto`, get the next phase (`kivax state next`), `set-phase` it, and chain into the matching `kivax-<next>` skill without stopping; with `human`, present the IT summary and wait for approval.
 
 ---
 ## Specialist persona: Test Writer

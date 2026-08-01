@@ -58,9 +58,17 @@ def test_full_init_and_doctor_via_real_subprocess(store, repo_dir, git):
     payload = json.loads(r.stdout)
     assert payload["number"] == "01"
 
+    # A real subprocess doesn't see the forge_cli_present fixture, so doctor
+    # here reports whatever this machine actually has. CI runners ship `gh`;
+    # a dev box without one shouldn't fail the suite over it.
+    import shutil
     r = _run(store, repo_dir, "doctor")
-    assert r.returncode == 0
-    assert "OK" in r.stdout
+    if any(shutil.which(cli) for cli in ("gh", "glab")):
+        assert r.returncode == 0
+        assert "OK" in r.stdout
+    else:
+        assert r.returncode == 1
+        assert "no forge CLI on PATH" in r.stdout
 
 
 def test_unknown_command_via_real_subprocess(store):

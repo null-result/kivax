@@ -11,7 +11,7 @@ This runs **after** the audit has passed: the code is anchored, and what's left 
 2. Delegation: if your tool supports invoking a separate specialist agent, delegate to the **knowledge-curator** agent now, passing it only the active feature and $ARGUMENTS if given. Otherwise, act as the Knowledge Curator yourself, in this same context, following the "Specialist persona: Knowledge Curator" section below.
 3. If the curator returns a `GAP:` — something it found that is really unspecified *behavior* — that goes to the human for `kivax-evolve`, exactly like a gap from any other phase. It does **not** get written into the lessons store: this store is not a back door around spec-first.
 4. Check `kivax state gate retro`. With `human`, present the curator's report — lessons created, reinforced, retired, and the candidates it rejected — and wait for approval; a lesson binds every future feature that matches its scope, so it's worth a human read. With `auto`, proceed if `kivax lessons lint --strict` passes.
-5. Commit the store (`docs(lessons): ...`) alongside the feature.
+5. Commit the store (`docs(lessons): ...`) alongside the feature, then `git push` — the lessons belong in the same pull request as the work that taught them.
 6. When proceeding: `kivax state next`. If it prints `done`, run `kivax state set-phase done` and finish. If it prints another phase (a user-added one), `set-phase` it and continue with the matching `kivax-<next>` skill per its gate.
 
 **Zero lessons is a valid, common, and honest outcome.** A cycle that went smoothly taught nothing, and padding the store to look productive is the one way to ruin it: every future planner reads every applicable lesson, so each worthless entry buys inattention to the good ones.
