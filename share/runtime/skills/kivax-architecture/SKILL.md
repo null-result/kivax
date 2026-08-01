@@ -1,18 +1,17 @@
 ---
 name: kivax-architecture
-description: "One-time creation of ARCHITECTURE.md: authored from the intended stack for a greenfield project, or reverse-engineered from the existing codebase otherwise. Use at project setup, right after the principles phase, when ARCHITECTURE.md doesn't exist yet."
+description: "Creates ARCHITECTURE.md: authored from the intended stack for a greenfield project, or reverse-engineered from the existing codebase otherwise. Part of one-time project setup — normally reached through the kivax-setup skill."
 ---
 
-Architecture phase. Covers **initial creation only** — ongoing upkeep as the project evolves happens inside the `kivax-plan` skill, not by re-running this one.
+Architecture: the project's structure, documented once.
 
-1. Check whether `paths.architecture` (from `.kivax/config.yml`, default `ARCHITECTURE.md`) already exists on disk.
-   - **If it exists**: this phase is a no-op. Say so briefly, then get the next phase with `kivax state next`, run `kivax state set-phase <next>`, and continue with the matching `kivax-<next>` skill — **do not check the gate**, there is nothing to approve on a pure skip. (If the human wants it refreshed or restructured, that's a manual request, not this phase's job.)
-   - **If it doesn't exist**: continue with the steps below.
-2. Read `greenfield` from `.kivax/config.yml` (set during `kivax init`) to pick a mode:
+This is **not a phase**. It's a step of one-time project setup (see the `kivax-setup` skill), so it never touches `kivax state`. It covers **initial creation only** — ongoing upkeep as the project evolves happens inside the `kivax-plan` skill, which is the one that knows what a feature changed structurally. If the human wants the document refreshed or restructured, that's an explicit request, not something this skill does on its own.
+
+1. Read `greenfield` from `.kivax/config.yml` (set during `kivax init`) to pick a mode:
    - **`greenfield: true`** → delegation: if your tool supports invoking a separate specialist agent, delegate to **tech-planner** to draft `ARCHITECTURE.md` from the intended stack (`stack.profiles` in config) and a short conversation with the human about the intended structure. Otherwise, act as the Tech Planner yourself, following the "Specialist persona: Tech Planner (architecture authoring)" section below.
    - **`greenfield: false`** → delegation: if your tool supports invoking a separate specialist agent, delegate to **tech-planner** to explore the existing codebase and reverse-engineer the document. Otherwise, act as the Tech Planner yourself, following the "Specialist persona: Tech Planner (architecture reverse-engineering)" section below.
-3. Check the gate: `kivax state gate architecture`. If `human`, present the draft and wait for explicit approval. If `auto`, proceed only if there are no open ambiguities about the documented structure.
-4. When proceeding: get the next phase with `kivax state next`, run `kivax state set-phase <next>`, and continue with the matching `kivax-<next>` skill.
+2. Check the gate: `kivax state gate architecture`. It is always `human`: present the draft and wait for explicit approval, resolving any open ambiguities about the documented structure first.
+3. When approved, write `ARCHITECTURE.md` at the repo root and hand back to the `kivax-setup` skill.
 
 ---
 ## Specialist persona: Tech Planner (architecture authoring)

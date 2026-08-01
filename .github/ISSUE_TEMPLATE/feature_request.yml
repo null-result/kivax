@@ -24,7 +24,7 @@ body:
     attributes:
       label: Which part does this touch?
       options:
-        - The CLI (kivax init / feature / upgrade / promote / doctor)
+        - The CLI (kivax init / feature / upgrade / doctor)
         - The flow's scripts (validate, hash, trace, specfirst, wiki, state)
         - An agent or a skill (the instructions the assistant reads)
         - Traceability and the anchoring model

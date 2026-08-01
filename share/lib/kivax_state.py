@@ -6,10 +6,10 @@ up the flow by reading this file.
 
 Usage:
   kivax state show
-  kivax state set-phase <phase>  # any phase in the config's pipeline, or 'done'
+  kivax state set-phase <phase>  # any phase in the pipeline, or 'done'
   kivax state set-req <REQ-ID|IT-ID> <pending|red|green|invalidated>
   kivax state sync-reqs   # adds the ACTIVE feature's new ids to the state
-  kivax state gate <phase>  # prints 'human' or 'auto' per .kivax/config.yml
+  kivax state gate <phase>  # prints 'human' or 'auto' for the phase
   kivax state next        # prints the phase after the current one ('done' at the end)
 
 Features are created and switched with `kivax feature`, not here: this module
@@ -40,7 +40,15 @@ from datetime import datetime, timezone
 
 import yaml
 
-from kivax_lib import TERMINAL_PHASE, active_feature, load_config, load_spec, path_of, pipeline_of
+from kivax_lib import (
+    PIPELINE,
+    TERMINAL_PHASE,
+    active_feature,
+    gate_of,
+    load_config,
+    load_spec,
+    path_of,
+)
 
 REQ_STATES = ["pending", "red", "green", "invalidated"]
 # Task vocabulary lives here rather than in kivax_task because this module owns
@@ -160,15 +168,10 @@ def main() -> int:
         return 1
     cmd = sys.argv[1]
     root, cfg = load_config()
-    phases = pipeline_of(cfg) + [TERMINAL_PHASE]
+    phases = PIPELINE + [TERMINAL_PHASE]
 
     if cmd == "gate":
-        phase = sys.argv[2] if len(sys.argv) > 2 else ""
-        gates = cfg.get("gates", {}) or {}
-        mode = gates.get(phase, "human")  # unconfigured = human (fail-safe)
-        if mode not in ("human", "auto"):
-            sys.exit(f"ERROR: gates.{phase} must be 'human' or 'auto', not '{mode}'")
-        print(mode)
+        print(gate_of(sys.argv[2] if len(sys.argv) > 2 else ""))
         return 0
 
     if cmd == "init":
@@ -214,8 +217,8 @@ def main() -> int:
             print(TERMINAL_PHASE)
             return 0
         if current not in phases:
-            sys.exit(f"ERROR: current phase '{current}' is not in the pipeline {phases}. "
-                     f"Fix .kivax/state.yml or the 'pipeline' list in .kivax/config.yml.")
+            sys.exit(f"ERROR: current phase '{current}' is not one of {phases}. "
+                     f"Fix the active feature's 'phase' in .kivax/state.yml.")
         idx = phases.index(current)
         print(phases[idx + 1] if idx + 1 < len(phases) else TERMINAL_PHASE)
         return 0
@@ -223,7 +226,7 @@ def main() -> int:
     if cmd == "set-phase":
         phase = sys.argv[2] if len(sys.argv) > 2 else ""
         if phase not in phases:
-            sys.exit(f"Invalid phase '{phase}'. Valid (from the config's pipeline): {phases}")
+            sys.exit(f"Invalid phase '{phase}'. Valid: {phases}")
         active = require_active(state)
         log(state, f"phase {active.get('phase')} -> {phase}")
         active["phase"] = phase

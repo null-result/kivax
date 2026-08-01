@@ -1,14 +1,19 @@
 """Generates per-runtime agent files from the canonical sources in agents/*.md
 at install time ('kivax init' / 'kivax upgrade'), per the recipe in
-agent_runtimes.yml. Also used by 'kivax promote' to write local edits back
-into the canonical source instead of a per-runtime file.
+agent_runtimes.yml.
 
-Only two things are genuinely runtime-specific and can't be plain
-substitution — both driven by the canonical 'tools:' CSV:
+The generated file is a pure function of (canonical agent, runtime recipe,
+project model choices) — which is what lets 'kivax upgrade' overwrite these
+files without asking: nothing a user could want to keep lives in them.
+
+Three things are genuinely runtime-specific and can't be plain substitution:
   - opencode's tools are a deny-list (only 'write'/'edit'/'bash' are ever
     listed, and only when ABSENT from the canonical allow-list); everything
     else is opencode's own default.
   - cursor's 'readonly' is true iff neither 'write' nor 'edit' is allowed.
+  - 'model' has a different spelling per runtime for "use whatever the session
+    is using" ('inherit' on claude, 'auto' on cursor, the field simply absent
+    on opencode), so the recipe carries each runtime's own word for it.
 """
 import json
 from pathlib import Path
@@ -47,7 +52,7 @@ def _yaml_scalar(key: str, value) -> str:
     return f"{key}: {value}"
 
 
-def _computed(spec: str, name: str, fm: dict) -> str | None:
+def _computed(spec: str, fm: dict, model: str | None) -> str | None:
     """spec is 'readonly', 'opencode_tools', or 'model:<default>'. Returns the
     frontmatter line to emit, or None to omit the field entirely."""
     tools_lower = {t.lower() for t in _tools_list(fm)}
@@ -63,14 +68,21 @@ def _computed(spec: str, name: str, fm: dict) -> str | None:
         return "tools:\n" + "\n".join(f"  {t}: false" for t in missing)
 
     if spec.startswith("model:"):
+        # The project's config.yml wins over the agent's own suggestion, which
+        # wins over the runtime's word for "inherit". An empty default (as on
+        # opencode, which has no such word) means omit the field entirely.
         default = spec.split(":", 1)[1]
-        return _yaml_scalar("model", fm.get("model", default))
+        value = model or fm.get("model") or default
+        return _yaml_scalar("model", value) if value else None
 
     raise ValueError(f"Unknown computed field spec: {spec}")
 
 
-def render(name: str, fm: dict, body: str, runtime_cfg: dict) -> str:
-    """Renders one runtime's agent file content from a canonical (name, fm, body)."""
+def render(name: str, fm: dict, body: str, runtime_cfg: dict,
+           model: str | None = None) -> str:
+    """Renders one runtime's agent file content from a canonical (name, fm, body).
+    `model` is this project's choice for this agent, or None to leave it to the
+    canonical file and then the runtime default."""
     lines = ["---"]
     for key, source in runtime_cfg["fields"]:
         if source == "field:name":
@@ -80,7 +92,7 @@ def render(name: str, fm: dict, body: str, runtime_cfg: dict) -> str:
         elif source.startswith("value:"):
             lines.append(_yaml_scalar(key, source.split(":", 1)[1]))
         elif source.startswith("computed:"):
-            line = _computed(source.split(":", 1)[1], name, fm)
+            line = _computed(source.split(":", 1)[1], fm, model)
             if line is not None:
                 lines.append(line)
         else:
@@ -89,46 +101,28 @@ def render(name: str, fm: dict, body: str, runtime_cfg: dict) -> str:
     return "\n".join(lines) + body
 
 
-def generate_all(agents_src: Path, runtimes_cfg: dict, cache_root: Path) -> None:
+def generate_all(agents_src: Path, runtimes_cfg: dict, cache_root: Path,
+                 models: dict[str, str] | None = None) -> None:
     """Renders every canonical agent into cache_root/<runtime>/<filename>,
-    for every runtime declared in agent_runtimes.yml. Idempotent and cheap
-    enough to call before every command that needs the generated files —
-    it's the single place that keeps them fresh.
+    for every runtime declared in agent_runtimes.yml. `models` is the project's
+    {agent_name: model} choices. Idempotent and cheap enough to call before
+    every command that needs the generated files — it's the single place that
+    keeps them fresh.
 
     Each runtime's directory is pruned of files this run didn't write, so an
     agent renamed or deleted upstream can't survive as a stale rendered file
     that sync_pairs would then copy into every project."""
+    models = models or {}
     canonicals = [parse_canonical(p) for p in sorted(agents_src.glob("*.md"))]
     for runtime, cfg in runtimes_cfg.items():
         out_dir = cache_root / runtime
         out_dir.mkdir(parents=True, exist_ok=True)
         written: set[str] = set()
         for name, fm, body in canonicals:
-            content = render(name, fm, body, cfg)
+            content = render(name, fm, body, cfg, models.get(name))
             filename = cfg["filename"].format(name=name)
             (out_dir / filename).write_text(content, encoding="utf-8")
             written.add(filename)
         for stale in out_dir.iterdir():
             if stale.is_file() and stale.name not in written:
                 stale.unlink()
-
-
-def update_canonical(path: Path, *, description: str | None = None,
-                     tools: str | None = None, model: str | None = None,
-                     body: str | None = None) -> str:
-    """Applies a partial update to a canonical agents/<name>.md file's text
-    (only the fields passed) and returns the new file content. Used by
-    'kivax promote' to push a local edit back into the single shared source."""
-    fm, old_body = split_frontmatter(path.read_text(encoding="utf-8")) if path.is_file() else ({}, "\n")
-    if description is not None:
-        fm["description"] = description
-    if tools is not None:
-        fm["tools"] = tools
-    if model is not None:
-        fm["model"] = model
-    lines = ["---"]
-    for key in ("description", "tools", "model"):
-        if key in fm:
-            lines.append(_yaml_scalar(key, fm[key]))
-    lines.append("---")
-    return "\n".join(lines) + (body if body is not None else old_body)

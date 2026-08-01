@@ -31,7 +31,7 @@ Then, at the root of the project you want to work on:
 kivax init
 ```
 
-Answer the wizard, then open your AI assistant in that project and ask it to start a new feature. That's it — the rest of this document explains each step in detail.
+Answer the wizard, then open your AI assistant in that project and ask it to **set the project up** (writes `PRINCIPLES.md` and `ARCHITECTURE.md` with you, once) and then to **start a new feature**. That's it — the rest of this document explains each step in detail.
 
 ---
 
@@ -83,14 +83,13 @@ kivax init
 It's an interactive wizard that:
 
 1. **Asks which assistant(s) you use** — Claude Code, opencode, Cursor, GitHub Copilot in VS Code, GitHub Copilot CLI, OpenAI Codex CLI. Any combination (Claude Code defaults to yes, the rest to no).
-2. **Detects greenfield vs. existing code** (counts source files) and asks you to confirm — it never decides on its own. Stored as `greenfield` in the config, because the principles and architecture phases need it later.
-3. **Asks whether to include the `principles` and `architecture` phases** (default yes) — see [Principles and architecture](#principles-and-architecture).
-4. **Chooses the features root.** Kivax keeps one directory per feature under it (`specs/01-booking/`, `specs/02-cancel/`). If the project isn't greenfield it looks for `specs/`, `spec/`, `docs/specs/`… and offers what it finds — but if that folder already holds loose markdown, it says so and suggests a separate folder instead: Kivax never reads, moves, or migrates a pre-existing corpus of specs.
-5. **Asks what language the spec *content* should be written in** (`spec_language`) — see [Language](#language).
-6. **Detects your stack** by looking for `pom.xml`, `package.json`, `pyproject.toml`, `go.mod`… at the root and in first-level subdirectories (monorepo support), and presents it for confirmation.
-7. **Detects git's base branch** for PRs and diffs.
-8. **Proposes `legacy_globs`** if the project isn't greenfield — pre-existing files exempt from requiring a spec, for your confirmation. If it found a folder of spec documents you already had, that goes in too: those are documents, not untraced code, so editing one later isn't reported as a violation.
-9. **Writes `.kivax/config.yml`**, creates the (empty) features root, and **copies** the agents, skills, and orchestrator instructions into the project as ordinary files. No spec is written yet: the first one arrives with your first feature.
+2. **Detects greenfield vs. existing code** (counts source files) and asks you to confirm — it never decides on its own. Stored as `greenfield` in the config, because project setup needs it later.
+3. **Chooses the features root.** Kivax keeps one directory per feature under it (`specs/01-booking/`, `specs/02-cancel/`). If the project isn't greenfield it looks for `specs/`, `spec/`, `docs/specs/`… and offers what it finds — but if that folder already holds loose markdown, it says so and suggests a separate folder instead: Kivax never reads, moves, or migrates a pre-existing corpus of specs.
+4. **Asks what language the spec *content* should be written in** (`spec_language`) — see [Language](#language).
+5. **Detects your stack** by looking for `pom.xml`, `package.json`, `pyproject.toml`, `go.mod`… at the root and in first-level subdirectories (monorepo support), and presents it for confirmation.
+6. **Detects git's base branch** for PRs and diffs.
+7. **Proposes `legacy_globs`** if the project isn't greenfield — pre-existing files exempt from requiring a spec, for your confirmation. If it found a folder of spec documents you already had, that goes in too: those are documents, not untraced code, so editing one later isn't reported as a violation.
+8. **Writes `.kivax/config.yml`**, creates the (empty) features root, and **copies** the agents, skills, and orchestrator instructions into the project as ordinary files. No spec is written yet: the first one arrives with your first feature.
 
 ### Commit what it creates
 
@@ -109,7 +108,7 @@ Teammates then need nothing but `git clone` — the agents, skills, and config a
 kivax doctor
 ```
 
-Diagnoses the project's installation: missing config keys, an invalid `pipeline`, **a phase in `pipeline` with no matching `kivax-<phase>` skill** (the usual way a custom phase silently breaks), a gate that isn't `human`/`auto`, duplicate feature numbers or ids, a mistyped feature directory, tag regexes that predate the per-feature id form, empty agent/skill directories, a missing sync manifest, and leftover `.upstream` conflict files. It stays quiet about documentation folders you deliberately keep alongside your features — it only flags a directory that was clearly *meant* to be a feature.
+Diagnoses the project's installation: a missing `paths.features`, config keys left over from an older Kivax (it names each one and what replaced it), an `agents:` entry naming an agent that doesn't exist, a phase whose `kivax-<phase>` skill is missing, duplicate feature numbers or ids, a mistyped feature directory, tag regexes that predate the per-feature id form, and empty agent/skill directories. It stays quiet about documentation folders you deliberately keep alongside your features — it only flags a directory that was clearly *meant* to be a feature.
 
 ---
 
@@ -119,16 +118,14 @@ Once installed, you drive Kivax by **talking to your assistant**, not by typing 
 
 ### The pipeline
 
-The default sequence (the `pipeline` list in `.kivax/config.yml`):
+The sequence, fixed and the same in every Kivax project:
 
 ```
-principles → architecture → spec → compile → plan → tdd → it → audit → retro → done
+spec → compile → plan → tdd → it → audit → retro → done
 ```
 
-| Phase | Skill | What happens | Default gate |
+| Phase | Skill | What happens | Gate |
 |---|---|---|---|
-| `principles` | `kivax-principles` | Ratifies `PRINCIPLES.md` once. Self-skipping if the file exists. | human |
-| `architecture` | `kivax-architecture` | Creates `ARCHITECTURE.md` once. Self-skipping if the file exists. | human |
 | `spec` | `kivax-spec` | Drafts/refines the narrative `spec.md` by interviewing you. | human |
 | `compile` | `kivax-compile` | Compiles `spec.md` → canonical `spec.yml`; validates and hashes it. | human |
 | `plan` | `kivax-plan` | Writes `plan.md` (contracts, REQ→module→test mapping), branches, opens a draft PR. | human |
@@ -137,7 +134,11 @@ principles → architecture → spec → compile → plan → tdd → it → aud
 | `audit` | `kivax-audit` | Traceability gate (`kivax trace`) + clean-context PR review. | human |
 | `retro` | `kivax-retro` | Records what the cycle *cost* as lessons the next one has to answer for. | human |
 
-A **gate** is what happens at the end of a phase: `human` means the assistant stops and waits for your explicit approval; `auto` means it chains straight into the next phase. Gates are configurable per phase in `.kivax/config.yml`; an unconfigured gate is `human` (fail-safe).
+Every phase runs, for every feature. The sequence is not configurable, and neither are the gates — they're the workflow Kivax exists to impose, not settings.
+
+Writing `PRINCIPLES.md` and `ARCHITECTURE.md` is **not** part of this sequence: those describe the project, so they happen once, before your first feature — see [Project setup](#project-setup-principles-and-architecture).
+
+A **gate** is what happens at the end of a phase: `human` means the assistant stops and waits for your explicit approval; `auto` means it chains straight into the next phase. The phases where a mistake is expensive and hard to walk back — a wrong spec, a wrong plan, a passed audit — are the ones a person has to see.
 
 **Exceptions are not gates and are not configurable.** An `AMBIGUITY`, `DISPUTE`, `GAP`, `CONFLICT`, `PRINCIPLES-VIOLATION`, a `NOT PASSING` audit verdict, or a failed validation **always** stops the flow and comes to you, even when the gate is `auto`. `auto` delegates approval, never quality control.
 
@@ -252,28 +253,24 @@ One technical constraint that never changes: the **keys** in `spec.yml` (`given`
 
 ---
 
-## Principles and architecture
+## Project setup (principles and architecture)
 
-Two project-wide artifacts, distinct from the per-feature `spec.md`/`plan.md`, with opposite lifecycles:
+After `kivax init`, one thing is left before your first feature. Open your assistant and ask it to set the project up — the **`kivax-setup`** skill. It writes two project-wide documents, once:
 
-- **`PRINCIPLES.md`** — the project's non-negotiable engineering principles, ratified once by the `principles` phase (the spec-analyst interviews you). It is **not** a living document: once ratified it changes only on an explicit request to amend it, never as a side effect of a feature.
-- **`ARCHITECTURE.md`** — the system's actual technical shape, created once by the `architecture` phase (the tech-planner drafts it from the intended stack for a greenfield project, or reverse-engineers it from the existing codebase — decided by the `greenfield` flag) and then kept current **incrementally**: every `kivax-plan` updates only the sections the feature actually affects.
+- **`PRINCIPLES.md`** — the project's non-negotiable engineering principles, ratified by interviewing you (the spec-analyst). It is **not** a living document: once ratified it changes only on an explicit request to amend it, never as a side effect of a feature.
+- **`ARCHITECTURE.md`** — the system's actual technical shape (the tech-planner drafts it from the intended stack for a greenfield project, or reverse-engineers it from the existing codebase — decided by the `greenfield` flag), then kept current **incrementally**: every `kivax-plan` updates only the sections the feature actually affects.
 
-Both phases are **self-skipping**: if the file already exists the phase is a no-op and advances immediately, no gate involved — in practice they only do real work on a project's first feature. They're optional (decline them during `kivax init`, or remove them from `pipeline` later), but when present they're the only phases allowed to precede `spec`/`compile`.
+These are **not phases**. They describe the project, not the thing you're building this week, so putting them at the head of every feature's pipeline would have meant answering a question about the repository in the wrong place — two steps in every feature's history that did nothing. They happen once, they're tracked by the files existing on disk, and `kivax state` never sees them.
+
+`kivax feature new` refuses while either document is missing:
+
+```
+ERROR: this project hasn't been set up yet — PRINCIPLES.md, ARCHITECTURE.md are missing.
+```
+
+That's the whole enforcement: mandatory, but paid for once. `kivax doctor` reports it as a next step on a fresh project, and as a real problem if features already exist without them.
 
 Every `kivax-plan` and `kivax-audit` also cross-checks the feature against `PRINCIPLES.md` when it exists. A conflict is a `PRINCIPLES-VIOLATION:` — always escalated to you, never auto-resolved, regardless of the gate.
-
-**Adopting this on a project installed before the feature existed** is a manual edit — `kivax upgrade` never rewrites `config.yml` for you:
-
-```yaml
-pipeline: [principles, architecture, spec, compile, plan, tdd, it, audit]
-paths:
-  principles: PRINCIPLES.md
-  architecture: ARCHITECTURE.md
-gates:
-  principles: human
-  architecture: human
-```
 
 ---
 
@@ -314,30 +311,8 @@ Three rules keep the store from rotting into noise:
 
 A lesson is **never** a substitute for a requirement. If what the retro found is unspecified *behavior*, it's a `GAP:` and it goes through `kivax-evolve` into the spec — the lessons store is not a back door around spec-first.
 
-**Adopting this on a project installed before the phase existed** is a manual edit (`kivax upgrade` copies the new skill and agent in, but never rewrites `config.yml`):
-
-```yaml
-pipeline: [principles, architecture, spec, compile, plan, tdd, it, audit, retro]
-paths:
-  lessons: specs/lessons
-gates:
-  retro: human
-```
-
 ---
 
-## Extending the pipeline (custom phases)
-
-The phase sequence is data: the `pipeline` list in `.kivax/config.yml`. You can **add, remove, or reorder** phases — including entirely custom ones — by editing that list. Two invariants are enforced and not configurable: **`spec, compile` must appear consecutively**, and **only `principles`/`architecture` may precede them**. Those two are what makes the flow spec-anchored; `kivax state` and `kivax doctor` reject any pipeline that puts a custom phase ahead of them.
-
-To add a custom phase (say `deploy`):
-
-1. Add `deploy` to `pipeline` and, optionally, a `deploy: human|auto` entry under `gates` (unset = `human`, fail-safe).
-2. Add a `kivax-deploy` skill (a `SKILL.md` in a same-named folder) to every active runtime's skills directory — and, only for runtimes that support a separate specialist agent (claude, opencode, cursor, copilot-cli), an agent file too, if you want the step to run in an isolated context. These are ordinary project files: everything under `.claude/`, `.opencode/`, `.cursor/`, `.github/`, `.codex/` is yours to edit from the moment `kivax init` copies it in.
-
-Kivax doesn't model what your phase does — environments, deploy targets, and test harnesses are your skill's business. It just runs it in order with its gate, and treats its failures as exceptions like any built-in phase. A complete working example (deploy + regression) ships with the store at `~/.kivax/examples/custom-phases/`: copy the files in, adapt the placeholder skills, done.
-
----
 
 ## Project files and the global store
 
@@ -354,11 +329,10 @@ Kivax doesn't model what your phase does — environments, deploy targets, and t
   lib/kivax_agents.py                  (renders agents/*.md + agent_runtimes.yml into each
                                          runtime's agent-file shape)
   templates/                           (spec, plan, research, principles, architecture, state, PR…)
-  examples/custom-phases/              (ready-to-copy pipeline extension)
   ci/                                  (sample CI gate workflow)
 
 your-project/                          (all committed to git, no exceptions)
-  .claude/agents/*.md        # your copy — edit any of these directly (includes orchestrator.md)
+  .claude/agents/*.md        # generated — commit them, but change them upstream, not here
   .claude/skills/*/SKILL.md
   .opencode/agent/*.md       # if you use opencode
   .opencode/skills/*/SKILL.md
@@ -369,13 +343,12 @@ your-project/                          (all committed to git, no exceptions)
   .github/copilot-instructions.md   # if you use GitHub Copilot in VS Code
   .codex/skills/*/SKILL.md   # if you use OpenAI Codex CLI
   CLAUDE.md / AGENTS.md      # same content, two filenames — Claude Code needs the former
-  PRINCIPLES.md              # if you opted in — ratified once, rarely touched again
-  ARCHITECTURE.md            # if you opted in — kept current via kivax-plan
+  PRINCIPLES.md              # ratified once, rarely touched again
+  ARCHITECTURE.md            # kept current via kivax-plan
   .kivax/
     config.yml               # project config, yours, editable
     state.yml                # flow state (phase, REQs)
     traceability.lock.json   # traceability lock
-    sync.json                # tracks what each file was copied from, for 'kivax upgrade'
     templates/               # copy of the global templates
   specs/                     # your specs folder (or wherever you placed it)
     01-booking/              # one directory per feature, each with its own spec
@@ -392,7 +365,21 @@ SKILL.md content is identical across every runtime — only the destination dire
 
 The orchestrator's rendering is special in one way: besides landing as an ordinary agent file (`.claude/agents/orchestrator.md`, invokable explicitly on tools that support picking an agent), its frontmatter-stripped body is **also** what becomes `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` — the ambient context every runtime's default conversation reads. That's how the orchestrator is "the agent the human talks to" on tools without an agent picker.
 
-To use a different model for one agent, edit its file in your project and change (or add) the `model:` line — a normal local edit that `kivax upgrade` will never overwrite. To make the pin the default for future projects, `kivax promote agent <name> --model-only`.
+### Choosing a model per agent
+
+The agent files are generated, so you don't edit them to change a model — you say it once in `.kivax/config.yml` and Kivax bakes it into every runtime's file on the next `kivax init`/`kivax upgrade`:
+
+```yaml
+agents:
+  default:      {model: sonnet}   # applies to every agent below
+  orchestrator: {model: opus}     # ...except the ones you name
+  tech-planner: {model: opus}
+  implementer:  {model: sonnet}
+```
+
+The keys are agent names (`kivax doctor` rejects a typo). `default` is optional; omit the whole block and every agent inherits whatever model the assistant is already running. Values are passed through untouched — they're your assistant's vocabulary, not Kivax's, so use whatever spelling it expects (`opus`, `claude-opus-4-8`, `anthropic/claude-sonnet-4-5`…).
+
+This lands where the runtime can actually read it: Claude Code and Cursor take a `model:` in the agent frontmatter, opencode takes one when set, and GitHub Copilot CLI has no such field — there, the CLI picks the model and the setting has no effect.
 
 ---
 
@@ -400,47 +387,20 @@ To use a different model for one agent, edit its file in your project and change
 
 ### Pulling updates in: `kivax upgrade`
 
-Run it inside a project. For every file Kivax manages it compares three things: the global store's current version, what the project last synced from (tracked in `.kivax/sync.json`), and the project's current version.
+Run it inside a project. It re-materializes every file Kivax manages: agents and skills are rewritten from the global store, anything Kivax used to ship and no longer does is deleted, and files it doesn't manage are never touched.
 
-| Situation | What happens |
-|---|---|
-| You never touched it, upstream changed | Updated automatically |
-| You touched it, upstream didn't | Left alone |
-| Neither changed | Left alone |
-| **Both changed** | Left alone; the new upstream version is saved beside it as `<file>.upstream` for you to merge by hand |
-| A brand-new agent or skill was added upstream | Copied in |
+There's no merge and no conflict, because there's nothing to reconcile — the agent and skill files are *generated* from the store plus your `config.yml`, so those two together are the whole truth about what they should contain. **A hand-edit to one of them will be overwritten.** Everything a project legitimately varies lives in `config.yml`, which `kivax upgrade` never rewrites.
 
-`kivax doctor` flags leftover `.upstream` files until you resolve and delete them. `kivax upgrade --dry-run` previews without writing anything.
-
-For agents, "the global store's current version" means: re-render the canonical source right now — so an upgrade always compares your file against the *current* canonical content, never a stale pre-generated copy.
-
-This is the only thing that ever pulls from the global store into a project, and only when you run it.
-
-### Pushing a change out: `kivax promote`
-
-You tweaked something locally and want it to become the default for future projects:
-
-```bash
-kivax promote agent spec-analyst                # whole file
-kivax promote agent trace-auditor --model-only  # just the model: line
-kivax promote skill kivax-deploy                # phase-driver and reference skills work too
-```
-
-This writes into `~/.kivax`, so it affects new projects — and any existing project where you later run `kivax upgrade` there. Never automatically, never other projects on their own. Promoting a wholly custom agent that doesn't exist upstream creates it there, which is a convenient way to turn a one-off project agent into a new built-in.
-
-Promoting an agent writes into the single canonical source, not a per-runtime file, so it propagates to every runtime with one command. The description and body always promote; the **tools list only promotes from `claude` or `copilot-cli`** — Cursor's `readonly` flag and opencode's deny-list can't be reversed back into an exact tools list, so promoting from those leaves the canonical tools alone and says so.
-
----
+`kivax upgrade --dry-run` prints exactly what it would add, update, and remove, without writing anything. This is the only thing that ever pulls from the global store into a project, and only when you run it.
 
 ## CLI reference
 
-You'll rarely type these — the assistant runs most of them for you. The ones you own are `init`, `upgrade`, `promote`, `doctor`, and `version`.
+You'll rarely type these — the assistant runs most of them for you. The ones you own are `init`, `upgrade`, `doctor`, and `version`.
 
 | Command | What it does |
 |---|---|
 | `kivax init [--force]` | Install/configure the current project (wizard), or report if already installed |
-| `kivax upgrade [--dry-run]` | Pull non-conflicting updates from the global store into the project |
-| `kivax promote <agent\|skill> <name> [--model-only] [--runtime <r>]` | Push a local file (or just its model) to the global store |
+| `kivax upgrade [--dry-run]` | Re-copy agents, skills, and templates from the global store, pruning what it no longer ships |
 | `kivax doctor` | Diagnose the current project's installation |
 | `kivax version` | Version and location of the global store |
 | `kivax feature <new\|list\|show\|switch>` | Feature lifecycle: create one, list them, resolve its paths (`show --json`), or make an existing one active |
@@ -484,8 +444,11 @@ pip install pyyaml --break-system-packages
 **`ERROR: .kivax/config.yml does not exist. Run 'kivax init' first.`**
 You're not at the project root, or the project was never initialized. The scripts walk up parent directories looking for `.kivax/config.yml`, so this means it isn't anywhere above you.
 
-**`kivax doctor` reports unresolved `.upstream` files.**
-A previous `kivax upgrade` found a file changed both locally and upstream. Diff each `<file>.upstream` against `<file>`, merge by hand, then delete the `.upstream` sibling.
+**`kivax doctor` says my config's `version` is wrong and lists keys to delete.**
+The project was installed by an older Kivax, when the pipeline, the gates, and most paths were configurable. They aren't any more — Kivax owns the flow. Nothing is broken: those keys are simply ignored. Delete the ones doctor names, set `version: 3`, and the message goes away.
+
+**An edit I made to an agent or a skill file disappeared.**
+`kivax upgrade` rewrites those files from the global store — they're generated, not yours to edit. To change what an agent *does*, change it in `~/.kivax/agents/<name>.md` and re-run `kivax upgrade`. To change which model it runs on, use the `agents:` block in `.kivax/config.yml`, which upgrade never touches.
 
 **`ERROR running git diff against 'main'` from `kivax specfirst` or the audit.**
 The configured base branch doesn't exist locally. Fix `git.base_branch` in `.kivax/config.yml`, or fetch the branch.

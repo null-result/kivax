@@ -18,7 +18,7 @@ def test_new_creates_feature_and_seeds_spec(kivax_cli, project, repo_dir, call, 
     assert "REQ-01-001" in spec_md.read_text()
     state = yaml.safe_load((repo_dir / ".kivax/state.yml").read_text())
     assert state["active"]["number"] == "01"
-    assert state["active"]["phase"] == "principles"  # first pipeline phase
+    assert state["active"]["phase"] == "spec"  # first pipeline phase
 
 
 def test_new_rejects_bad_slug(kivax_cli, project, call):
@@ -187,3 +187,35 @@ def test_no_subcommand_prints_usage(kivax_cli, project, call, capsys):
     rc = call(kivax_cli.main, "feature")
     assert rc == 1
     assert "kivax feature <new|list|show|switch>" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- setup is a precondition
+# PRINCIPLES.md and ARCHITECTURE.md describe the project, so they're written
+# once by the kivax-setup skill before any feature exists — not checked at the
+# head of every feature. 'feature new' is where that becomes mandatory.
+def test_feature_new_refuses_until_the_project_is_set_up(kivax_cli, uninitialized_project, call):
+    rc = call(kivax_cli.main, "feature", "new", "booking")
+    assert isinstance(rc, str)
+    assert "hasn't been set up yet" in rc
+    assert "PRINCIPLES.md" in rc and "ARCHITECTURE.md" in rc
+    assert "kivax-setup" in rc
+
+
+def test_feature_new_names_only_the_missing_document(kivax_cli, uninitialized_project, call):
+    (uninitialized_project / "PRINCIPLES.md").write_text("# Principles\n")
+    rc = call(kivax_cli.main, "feature", "new", "booking")
+    assert isinstance(rc, str)
+    assert "ARCHITECTURE.md is missing" in rc
+    assert "PRINCIPLES.md" not in rc
+
+
+def test_feature_new_proceeds_once_setup_is_done(kivax_cli, uninitialized_project, call):
+    (uninitialized_project / "PRINCIPLES.md").write_text("# Principles\n")
+    (uninitialized_project / "ARCHITECTURE.md").write_text("# Architecture\n")
+    assert call(kivax_cli.main, "feature", "new", "booking") == 0
+
+
+def test_the_first_phase_of_a_feature_is_spec(kivax_cli, project, call, capsys):
+    """Setup left the pipeline, so a feature starts on real work immediately."""
+    assert call(kivax_cli.main, "feature", "new", "booking") == 0
+    assert "phase:   spec" in capsys.readouterr().out

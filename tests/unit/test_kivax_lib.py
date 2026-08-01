@@ -51,10 +51,30 @@ def test_path_of_resolves_relative_to_root(klib, tmp_path, minimal_config):
     assert klib.path_of(tmp_path, cfg, "wiki") == tmp_path / "specs/wiki"
 
 
-def test_path_of_missing_key_exits(klib, tmp_path, minimal_config):
-    cfg = minimal_config(paths={})
-    with pytest.raises(SystemExit, match="missing paths.wiki"):
-        klib.path_of(tmp_path, cfg, "wiki")
+def test_path_of_unknown_key_exits(klib, tmp_path, minimal_config):
+    with pytest.raises(SystemExit, match="not a path Kivax knows about"):
+        klib.path_of(tmp_path, minimal_config(), "nope")
+
+
+def test_paths_are_derived_from_the_features_root(klib, minimal_config):
+    paths = klib.paths_of(minimal_config(paths={"features": "docs/spec"}))
+    assert paths["wiki"] == "docs/spec/wiki"
+    assert paths["lessons"] == "docs/spec/lessons"
+
+
+@pytest.mark.parametrize("key,value", [
+    ("state", ".kivax/state.yml"),
+    ("lock", ".kivax/traceability.lock.json"),
+    ("principles", "PRINCIPLES.md"),
+    ("architecture", "ARCHITECTURE.md"),
+])
+def test_fixed_paths_ignore_whatever_the_config_says(klib, minimal_config, key, value):
+    cfg = minimal_config(paths={"features": "specs", key: "somewhere/else"})
+    assert klib.paths_of(cfg)[key] == value
+
+
+def test_paths_of_defaults_the_features_root(klib, minimal_config):
+    assert klib.paths_of(minimal_config(paths={}))["features"] == "specs"
 
 
 # --------------------------------------------------------------------------- active_profiles
@@ -93,12 +113,6 @@ def test_feature_name_property(klib, tmp_path):
     f = klib.Feature(number="02", slug="cancel", dir=tmp_path, spec_md=tmp_path / "spec.md",
                      spec_yml=tmp_path / "spec.yml", plan=tmp_path / "plan.md")
     assert f.name == "02-cancel"
-
-
-def test_features_root_missing_key_exits(klib, tmp_path, minimal_config):
-    cfg = minimal_config(paths={})
-    with pytest.raises(SystemExit, match="missing paths.features"):
-        klib.features_root(tmp_path, cfg)
 
 
 def test_features_root_resolves(klib, tmp_path, minimal_config):
@@ -340,43 +354,72 @@ def test_spec_hashes_handles_missing_lists(klib):
     assert klib.spec_hashes({}) == {"requirements": {}, "integration_scenarios": {}}
 
 
-# --------------------------------------------------------------------------- pipeline_of
-def test_pipeline_of_default(klib, minimal_config):
-    cfg = minimal_config(pipeline=None)
-    assert klib.pipeline_of(cfg) == klib.DEFAULT_PIPELINE
+# --------------------------------------------------------------------------- PIPELINE / gates
+def test_pipeline_is_the_per_feature_sequence_only(klib):
+    assert klib.PIPELINE == ["spec", "compile", "plan", "tdd", "it", "audit", "retro"]
 
 
-@pytest.mark.parametrize("pipeline", [
-    ["spec", "compile", "plan"],
-    ["principles", "spec", "compile"],
-    ["architecture", "spec", "compile"],
-    ["principles", "architecture", "spec", "compile", "deploy"],
+def test_setup_phases_are_not_in_the_feature_pipeline(klib):
+    """They describe the project, so they cost nothing per feature."""
+    assert klib.SETUP_PHASES == ["principles", "architecture"]
+    assert not set(klib.SETUP_PHASES) & set(klib.PIPELINE)
+
+
+def test_known_phases_covers_setup_and_the_pipeline(klib):
+    assert klib.KNOWN_PHASES == klib.SETUP_PHASES + klib.PIPELINE
+
+
+def test_pipeline_does_not_contain_the_terminal_phase(klib):
+    """'done' is where the flow ends, not a phase anyone runs."""
+    assert klib.TERMINAL_PHASE not in klib.PIPELINE
+
+
+def test_config_cannot_override_the_pipeline(klib, minimal_config):
+    """The whole point of the breaking change: a project that still carries a
+    'pipeline' key gets the real pipeline anyway, not its own."""
+    minimal_config(pipeline=["plan", "tdd"])
+    assert klib.PIPELINE[0] == "spec"
+
+
+# --------------------------------------------------------------------------- pending_setup
+def test_pending_setup_lists_both_documents_on_a_fresh_project(klib, tmp_path, minimal_config):
+    assert klib.pending_setup(tmp_path, minimal_config()) == ["principles", "architecture"]
+
+
+def test_pending_setup_is_empty_once_both_exist(klib, tmp_path, minimal_config):
+    (tmp_path / "PRINCIPLES.md").write_text("P")
+    (tmp_path / "ARCHITECTURE.md").write_text("A")
+    assert klib.pending_setup(tmp_path, minimal_config()) == []
+
+
+def test_pending_setup_reports_only_what_is_missing(klib, tmp_path, minimal_config):
+    (tmp_path / "PRINCIPLES.md").write_text("P")
+    assert klib.pending_setup(tmp_path, minimal_config()) == ["architecture"]
+
+
+def test_pending_setup_tracks_the_filesystem_not_a_flag(klib, tmp_path, minimal_config):
+    """Deleting a document puts setup back to pending — there is no second
+    source of truth in state.yml that could disagree with the disk."""
+    (tmp_path / "PRINCIPLES.md").write_text("P")
+    (tmp_path / "ARCHITECTURE.md").write_text("A")
+    assert klib.pending_setup(tmp_path, minimal_config()) == []
+    (tmp_path / "PRINCIPLES.md").unlink()
+    assert klib.pending_setup(tmp_path, minimal_config()) == ["principles"]
+
+
+def test_every_phase_has_a_gate(klib):
+    assert set(klib.PIPELINE) <= set(klib.GATES)
+
+
+@pytest.mark.parametrize("phase,mode", [
+    ("spec", "human"), ("compile", "human"), ("plan", "human"),
+    ("tdd", "auto"), ("it", "auto"), ("audit", "human"), ("retro", "human"),
+    ("principles", "human"), ("architecture", "human"), ("evolve", "human"),
 ])
-def test_pipeline_of_valid_custom(klib, minimal_config, pipeline):
-    cfg = minimal_config(pipeline=pipeline)
-    assert klib.pipeline_of(cfg) == pipeline
+def test_gate_of_known_phases(klib, phase, mode):
+    assert klib.gate_of(phase) == mode
 
 
-def test_pipeline_of_not_a_list_exits(klib, minimal_config):
-    with pytest.raises(SystemExit, match="must be a list"):
-        klib.pipeline_of(minimal_config(pipeline="spec"))
-
-
-def test_pipeline_of_missing_spec_compile_exits(klib, minimal_config):
-    with pytest.raises(SystemExit, match="must continue with"):
-        klib.pipeline_of(minimal_config(pipeline=["plan", "tdd"]))
-
-
-def test_pipeline_of_reordered_mandatory_exits(klib, minimal_config):
-    with pytest.raises(SystemExit, match="must continue with"):
-        klib.pipeline_of(minimal_config(pipeline=["compile", "spec"]))
-
-
-def test_pipeline_of_done_in_list_exits(klib, minimal_config):
-    with pytest.raises(SystemExit, match="implicit terminal phase"):
-        klib.pipeline_of(minimal_config(pipeline=["spec", "compile", "done"]))
-
-
-def test_pipeline_of_duplicate_phase_exits(klib, minimal_config):
-    with pytest.raises(SystemExit, match="duplicate phase names"):
-        klib.pipeline_of(minimal_config(pipeline=["spec", "compile", "spec"]))
+def test_gate_of_unknown_phase_is_human(klib):
+    """Fail-safe: the answer nobody regrets is the one that asks a person."""
+    assert klib.gate_of("whatever") == "human"

@@ -45,7 +45,7 @@ The suite is organized by how much of the system a test touches:
   standalone helpers (`ask`, `find_source_files`, `_check_tag_regexes`, …) the
   same way.
 - **`tests/integration/`** — one `kivax` subcommand at a time (`init`, `feature`,
-  `doctor`, `upgrade`, `promote`, dispatch), against a project scaffolded by the
+  `doctor`, `upgrade`, dispatch), against a project scaffolded by the
   `project`/`use_store` fixtures.
 - **`tests/e2e/`** — full multi-feature flows (the kind of session an agent
   actually runs), plus a handful of true subprocess invocations of the real
@@ -83,7 +83,6 @@ share/           everything that gets copied into the global store:
   runtime/skills/  the phase-driver and reference skills (SKILL.md)
   lib/             the kivax_*.py scripts the CLI dispatches to
   templates/       scaffolds copied into each project
-  examples/        ready-to-copy pipeline extensions
   ci/              a SAMPLE CI gate for projects that USE Kivax
 tests/
   conftest.py      shared fixtures — read its module docstring first

@@ -8,8 +8,13 @@
 #   field:<name>      verbatim value from the canonical frontmatter (or,
 #                     for 'name', the agent's filename stem)
 #   value:<literal>   a fixed constant, same for every agent on this runtime
-#   computed:<fn>     a genuinely derived value — see kivax_agents.py's
-#                     COMPUTED_FIELDS for what each one does
+#   computed:<fn>     a genuinely derived value — see _computed() in
+#                     kivax_agents.py for what each one does
+#
+# 'computed:model:<default>' is where a project's `agents: {<name>: {model: …}}`
+# choice lands. The default after the colon is this runtime's own word for
+# "whatever the session is already using"; leave it empty (opencode) when the
+# runtime has no such word and the field should simply be omitted.
 #
 # Only runtimes with real subagent/context-isolation support appear here
 # (claude, opencode, cursor, copilot-cli) — codex and vscode-copilot have no
@@ -31,6 +36,7 @@ opencode:
   fields:
     - [description, "field:description"]
     - [mode, "value:subagent"]
+    - [model, "computed:model:"]
     - [tools, "computed:opencode_tools"]
 
 cursor:
@@ -43,6 +49,8 @@ cursor:
     - [readonly, "computed:readonly"]
     - [is_background, "value:false"]
 
+# copilot-cli agent files carry no model field — the CLI chooses the model, so
+# a project's `agents:` choice has no effect on this runtime.
 copilot-cli:
   dir: .github/agents
   filename: "{name}.agent.md"

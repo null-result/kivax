@@ -13,7 +13,6 @@ java-spring:
     - '@Tag\("(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})"\)'
   cmd_test_unit: "./mvnw -q test"
   cmd_test_it:   "./mvnw -q verify -Pintegration"
-  cmd_lint:      "./mvnw -q checkstyle:check"
 
 python-pytest:
   label: "Python (pytest)"
@@ -24,7 +23,6 @@ python-pytest:
     - '@pytest\.mark\.req\("(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})"\)'
   cmd_test_unit: "pytest -q -m 'not it'"
   cmd_test_it:   "pytest -q -m it"
-  cmd_lint:      "ruff check ."
 
 node-jest:
   label: "Node.js (Jest)"
@@ -37,7 +35,6 @@ node-jest:
     - 'it\(.*\[(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})\]'
   cmd_test_unit: "npx jest --testPathIgnorePatterns=integration"
   cmd_test_it:   "npx jest integration"
-  cmd_lint:      "npx eslint ."
 
 go:
   label: "Go"
@@ -48,4 +45,3 @@ go:
     - '//\s*kivax:(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})'
   cmd_test_unit: "go test ./... -short"
   cmd_test_it:   "go test ./... -run Integration"
-  cmd_lint:      "go vet ./..."
