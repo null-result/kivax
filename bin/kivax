@@ -267,11 +267,37 @@ def detect_stacks(root: Path, catalog: dict) -> list[tuple[str, str]]:
 
 
 def detect_base_branch(root: Path) -> str:
+    """The branch features are cut from and merged back into.
+
+    'develop' wins when it exists, because Kivax's flow is gitflow's feature
+    branch: `origin/HEAD` points at the published branch (usually `main`), and
+    on a gitflow repo that's the release branch, not the integration one — a
+    feature PR opened against it would be targeting production.
+    """
+    if any(_ref_exists(root, ref) for ref in
+           ("refs/heads/develop", "refs/remotes/origin/develop")):
+        return "develop"
     out = sh(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], root)
     if out:
         return out.rsplit("/", 1)[-1]
     out = sh(["git", "branch", "--show-current"], root)
     return out or "main"
+
+
+def _ref_exists(root: Path, ref: str) -> bool:
+    try:
+        return subprocess.run(["git", "show-ref", "--verify", "--quiet", ref],
+                              cwd=root, capture_output=True).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+# Gitflow's own name for what Kivax produces. Fixed, like the pipeline: the
+# flow always cuts a feature branch, so a project choosing its own prefix would
+# only make every doc, skill, and error message in the system wrong about
+# itself. The base it branches FROM is configurable (git.base_branch) because
+# that genuinely varies; what the branch is called does not.
+BRANCH_PREFIX = "feature/"
 
 
 # --------------------------------------------------------------------------- sync (copy-based)
@@ -1005,6 +1031,24 @@ OBSOLETE_CONFIG_KEYS = {
 }
 
 
+# The flow's contract is that a feature ends as a pull request a human can
+# review and merge. A pull request is a forge concept, not a git one: no git
+# command opens one, so without a forge CLI the flow cannot deliver what it
+# promises. Checked here rather than discovered at the plan phase, where the
+# branch and commits already exist and the failure is expensive.
+FORGE_CLIS = ("gh", "glab")
+
+
+def _check_forge_cli() -> list[str]:
+    import shutil
+    if any(shutil.which(cli) for cli in FORGE_CLIS):
+        return []
+    return ["no forge CLI on PATH (looked for: " + ", ".join(FORGE_CLIS) + "). "
+            "The plan phase opens the feature's draft pull request, and git alone "
+            "cannot create one — install GitHub's 'gh' or GitLab's 'glab' and "
+            "authenticate it ('gh auth login')"]
+
+
 def _check_config_version(cfg: dict) -> list[str]:
     found = cfg.get("version")
     if found == CONFIG_VERSION:
@@ -1095,9 +1139,9 @@ def cmd_doctor(argv: list[str]) -> int:
         rel_dir = skills_dirs.get(runtime)
         if rel_dir is None:
             continue
-        # Every phase driver, plus 'setup' — which isn't a phase but is the
-        # entry point to the project bootstrap, so a project without it has no
-        # way to write the two documents 'feature new' demands.
+        # Phase drivers, plus 'setup' — not a phase, but the entry point to the
+        # project bootstrap, so without it there's no way to write the two
+        # documents 'feature new' demands. A miss in either dead-ends the flow.
         for name in pipeline + klib_setup_phases() + ["setup"]:
             if (str(rel_dir), name) in checked:
                 continue
@@ -1105,8 +1149,17 @@ def cmd_doctor(argv: list[str]) -> int:
             if not (root / rel_dir / f"kivax-{name}" / "SKILL.md").is_file():
                 problems.append(f"{rel_dir.as_posix()}/kivax-{name}/SKILL.md is missing, "
                                 f"so the flow dead-ends at '{name}' — run 'kivax upgrade'")
+        # 'git' is the merge/release/hotfix skill. It never runs as part of the
+        # flow, so its absence dead-ends nothing — but the human who asks to
+        # merge a reviewed PR would get an improvised answer instead of the
+        # confirm-before-each-irreversible-step protocol.
+        if not (root / rel_dir / "kivax-git" / "SKILL.md").is_file():
+            problems.append(f"{rel_dir.as_posix()}/kivax-git/SKILL.md is missing, so "
+                            f"merge/release/hotfix requests have no defined "
+                            f"procedure — run 'kivax upgrade'")
 
     problems += _check_features(root, cfg)
+    problems += _check_forge_cli()
 
     # Not a problem on a freshly-init'd project — it's the next step. It only
     # becomes one once features exist, which means someone wrote a spec against

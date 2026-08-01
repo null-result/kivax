@@ -240,3 +240,15 @@ def test_setup_skills_are_checked_even_though_they_are_not_phases(
     rc = call(kivax_cli.main, "doctor")
     assert rc == 1
     assert "kivax-setup/SKILL.md is missing" in capsys.readouterr().out
+
+
+def test_missing_git_skill_reported(kivax_cli, project, repo_dir, call, capsys):
+    """kivax-git isn't a phase, so its absence dead-ends nothing — but a human
+    asking to merge would get an improvised answer instead of the protocol."""
+    import shutil
+    shutil.rmtree(repo_dir / ".claude/skills/kivax-git")
+    rc = call(kivax_cli.main, "doctor")
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "kivax-git/SKILL.md is missing" in out
+    assert "merge/release/hotfix" in out

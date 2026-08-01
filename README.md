@@ -39,6 +39,7 @@ Answer the wizard, then open your AI assistant in that project and ask it to **s
 
 - **Python 3.10 or later**, with `pip` available (used to install PyYAML if it's missing).
 - **git** — Kivax's traceability model diffs your branch against a base branch, so run `kivax init` inside a git repository, at its root.
+- **A forge CLI: [`gh`](https://cli.github.com) or [`glab`](https://gitlab.com/gitlab-org/cli)**, authenticated (`gh auth login`). The flow ends by opening a pull request, and a pull request is a forge concept, not a git one — no git command creates one. `kivax doctor` checks for it.
 - **At least one supported assistant**: [Claude Code](https://claude.com/product/claude-code), [opencode](https://opencode.ai), [Cursor](https://cursor.com), [GitHub Copilot](https://github.com/features/copilot) in VS Code, [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli), or [OpenAI Codex CLI](https://developers.openai.com/codex). You can mix several in the same project.
 - Linux and macOS are the primary targets; Windows works via `cmd.exe`/PowerShell but is less battle-tested.
 
@@ -87,7 +88,7 @@ It's an interactive wizard that:
 3. **Chooses the features root.** Kivax keeps one directory per feature under it (`specs/01-booking/`, `specs/02-cancel/`). If the project isn't greenfield it looks for `specs/`, `spec/`, `docs/specs/`… and offers what it finds — but if that folder already holds loose markdown, it says so and suggests a separate folder instead: Kivax never reads, moves, or migrates a pre-existing corpus of specs.
 4. **Asks what language the spec *content* should be written in** (`spec_language`) — see [Language](#language).
 5. **Detects your stack** by looking for `pom.xml`, `package.json`, `pyproject.toml`, `go.mod`… at the root and in first-level subdirectories (monorepo support), and presents it for confirmation.
-6. **Detects git's base branch** for PRs and diffs.
+6. **Detects git's base branch** for PRs and diffs — `develop` when the repo has one (gitflow's integration branch), otherwise whatever `origin/HEAD` points at.
 7. **Proposes `legacy_globs`** if the project isn't greenfield — pre-existing files exempt from requiring a spec, for your confirmation. If it found a folder of spec documents you already had, that goes in too: those are documents, not untraced code, so editing one later isn't reported as a violation.
 8. **Writes `.kivax/config.yml`**, creates the (empty) features root, and **copies** the agents, skills, and orchestrator instructions into the project as ordinary files. No spec is written yet: the first one arrives with your first feature.
 
@@ -128,10 +129,10 @@ spec → compile → plan → tdd → it → audit → retro → done
 |---|---|---|---|
 | `spec` | `kivax-spec` | Drafts/refines the narrative `spec.md` by interviewing you. | human |
 | `compile` | `kivax-compile` | Compiles `spec.md` → canonical `spec.yml`; validates and hashes it. | human |
-| `plan` | `kivax-plan` | Writes `plan.md` (contracts, REQ→module→test mapping), branches, opens a draft PR. | human |
+| `plan` | `kivax-plan` | Writes `plan.md` (contracts, REQ→module→test mapping), cuts `feature/NN-slug`, pushes, opens a draft PR. | human |
 | `tdd` | `kivax-tdd` | Per REQ: red unit tests, then minimum code until green. | auto |
 | `it` | `kivax-it` | Integration tests from the spec's `integration_scenarios`. | auto |
-| `audit` | `kivax-audit` | Traceability gate (`kivax trace`) + clean-context PR review. | human |
+| `audit` | `kivax-audit` | Traceability gate (`kivax trace`) + clean-context PR review, then marks the PR ready. | human |
 | `retro` | `kivax-retro` | Records what the cycle *cost* as lessons the next one has to answer for. | human |
 
 Every phase runs, for every feature. The sequence is not configurable, and neither are the gates — they're the workflow Kivax exists to impose, not settings.
@@ -250,6 +251,41 @@ Two deliberately independent things:
 The agents and skills (the instructions the assistant reads) are written in English and don't change with `spec_language`. That doesn't affect what language the assistant replies to you in, which always follows the conversation.
 
 One technical constraint that never changes: the **keys** in `spec.yml` (`given`, `when`, `then`, `requirements`, `priority`…) are fixed. They're the format the scripts read literally; translating them would break validation and traceability. Only the prose gets translated.
+
+---
+
+## Git: the flow is a gitflow feature branch
+
+Every feature runs on its own branch and **ends as a pull request marked ready for review**. That pull request is the deliverable — Kivax never merges it.
+
+```
+develop ──┬─────────────────────────────────────────────► (you merge)
+          └── feature/01-booking ──[spec+plan]──[REQ commits]──[IT]──[lessons]──► PR ready
+```
+
+| Phase | What it does to git |
+|---|---|
+| `plan` | `git checkout -b feature/NN-slug origin/<base>`, commits spec+plan, **pushes**, opens the PR as a **draft** |
+| `tdd` | one commit per green REQ (`feat(REQ-01-002): …`), pushes before the phase ends |
+| `it` | commits the integration tests, pushes |
+| `retro` | commits the lessons store, pushes |
+| `audit` | checks the tree is clean and everything is pushed, then marks the PR **ready** and writes the reviewer's summary into its description |
+
+**The base branch is gitflow's integration branch.** `kivax init` picks `develop` when the repo has one, and stores it as `git.base_branch`. It deliberately doesn't trust `origin/HEAD`: that points at the *published* branch, which on a gitflow repo is `main` — a feature PR against it would be targeting production. The branch name (`feature/`) is fixed, like the pipeline.
+
+**Every phase pushes.** A commit that isn't pushed isn't in the pull request, and the pull request is the only thing a reviewer actually reads.
+
+### Merges, releases, and hotfixes
+
+These are **not** part of the flow. They live in the `kivax-git` skill, which runs **only when you ask for it by name** and confirms every irreversible step with you first:
+
+| Ask for | What it does |
+|---|---|
+| merge | Checks the PR isn't draft, its checks are green, and it has an approving review — then merges on your confirmation |
+| release | Opens a `develop → main` PR, and after it lands, tags and opens the back-merge |
+| hotfix | Branches from `main`, and reminds you the fix still needs a spec, then opens PRs into **both** `main` and `develop` |
+
+The assistant will never merge, tag, or deploy on its own initiative — not even when the audit passes. A passing audit is what makes a PR *reviewable*; it isn't a review.
 
 ---
 
