@@ -35,10 +35,19 @@ def test_version_via_real_subprocess(store):
 
 
 def test_full_init_and_doctor_via_real_subprocess(store, repo_dir, git):
-    answers = "\n" * 6 + "y\n" + "\n" + "\n" + "\n" + "python-pytest\n" + "\n"
+    answers = "\n" * 6 + "y\n" + "\n" + "\n" + "python-pytest\n" + "\n"
     r = _run(store, repo_dir, "init", stdin=answers)
     assert r.returncode == 0, r.stdout + r.stderr
     assert (repo_dir / ".kivax/config.yml").is_file()
+
+    # A real project can't start a feature until the kivax-setup skill has
+    # written these two; in a subprocess test nothing can run that skill, so
+    # stand in for it the same way an assistant would leave the repo.
+    r = _run(store, repo_dir, "feature", "new", "checkout")
+    assert r.returncode == 1
+    assert "hasn't been set up yet" in r.stdout + r.stderr
+    (repo_dir / "PRINCIPLES.md").write_text("# Principles\n")
+    (repo_dir / "ARCHITECTURE.md").write_text("# Architecture\n")
 
     r = _run(store, repo_dir, "feature", "new", "checkout")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -49,9 +58,17 @@ def test_full_init_and_doctor_via_real_subprocess(store, repo_dir, git):
     payload = json.loads(r.stdout)
     assert payload["number"] == "01"
 
+    # A real subprocess doesn't see the forge_cli_present fixture, so doctor
+    # here reports whatever this machine actually has. CI runners ship `gh`;
+    # a dev box without one shouldn't fail the suite over it.
+    import shutil
     r = _run(store, repo_dir, "doctor")
-    assert r.returncode == 0
-    assert "OK" in r.stdout
+    if any(shutil.which(cli) for cli in ("gh", "glab")):
+        assert r.returncode == 0
+        assert "OK" in r.stdout
+    else:
+        assert r.returncode == 1
+        assert "no forge CLI on PATH" in r.stdout
 
 
 def test_unknown_command_via_real_subprocess(store):

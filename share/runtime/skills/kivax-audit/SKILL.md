@@ -8,7 +8,32 @@ Traceability gate and final review.
 1. Delegation: if your tool supports invoking a separate specialist agent, delegate to **trace-auditor** now. Otherwise, act as the Traceability Auditor yourself, in this same context, following the "Specialist persona: Traceability Auditor" section below. Either way, the PASSING/NOT PASSING verdict is *computed* by `kivax trace`, never judged by reasoning about the diff — the auditor's job is to run that script and interpret/route its output, not re-derive its answer. If NOT PASSING: route each violation to the agent the auditor suggests, and repeat the audit when done. There's no "passing with observations". A `PRINCIPLES-VIOLATION:` (see the persona's protocol) is separate from the PASSING/NOT PASSING verdict and always goes to the human regardless of it.
 2. On PASSING: delegation: if your tool supports invoking a separate specialist agent, delegate to **reviewer** (clean context: only diff + spec.yml + plan.md). Otherwise, act as the Reviewer yourself following the "Specialist persona: Reviewer" section below.
 3. Check `kivax state gate audit`. With `human` (recommended), present the auditor's verdict + the reviewer's report + any principles violations and wait for approval. With `auto`, only proceed if the auditor gave PASSING, the reviewer left NO BLOCKING findings, and there are NO principles violations — any of these is an exception and stops the flow regardless, to be routed (uncovered spec → the `kivax-evolve` skill; code → implementer via a mini TDD cycle for the affected REQ, through the `kivax-tdd` skill; principles violation → the human decides whether to fix the change or amend the principles).
-4. When proceeding: mark the PR as ready (remove draft status, update the description with the reviewer's summary). Then `kivax state next`: in the default pipeline that's `retro` — `set-phase` it and continue with the `kivax-retro` skill per its gate, which is where this cycle's hard-won knowledge gets written down before everyone forgets it. If it prints `done`, run `kivax state set-phase done` and finish — the human or CI runs the merge (and the deploy, unless a later custom phase in the pipeline handles it). Any other phase (a user-added one, e.g. `deploy`) works the same way: `set-phase` it and continue with the matching `kivax-<next>` skill per its gate.
+4. When proceeding: hand the pull request over for review — see "Handing over the pull request" below. Then `kivax state next`, which prints `retro` — `set-phase` it and continue with the `kivax-retro` skill per its gate, which is where this cycle's hard-won knowledge gets written down before everyone forgets it. If it prints `done`, run `kivax state set-phase done` and finish. **You never merge**: the human does, when they're satisfied with the review (the `kivax-git` skill assists, only if they ask for it).
+
+---
+## Handing over the pull request
+
+This is the flow's deliverable: a pull request a human can review and merge. Before marking it ready, make sure it actually contains the work.
+
+```bash
+git status --porcelain          # must be empty — nothing uncommitted
+git push                        # everything local is now on the branch
+gh pr view --json number,state,isDraft   # the PR this branch opened
+```
+
+If `git status` isn't clean, the audit you just ran covered a working tree the reviewer will never see. Commit what belongs to the feature (or say what's left over) before continuing — don't mark ready over uncommitted work.
+
+If no PR exists for the branch, the plan phase couldn't create one (usually no `gh`/`glab`). Say so and stop: opening it now, after the fact, is fine — but the human should know the flow ran without one.
+
+Then:
+
+```bash
+gh pr ready                     # drop draft status
+gh pr edit --body-file <updated>   # reviewer's summary into the description
+# GitLab: glab mr update <id> --ready --description ...
+```
+
+Leave it there. Marking ready is the handover; the review and the merge are the human's.
 
 ---
 ## Specialist persona: Traceability Auditor
@@ -27,7 +52,7 @@ Verify that spec, tests, and code are anchored to each other before allowing mer
 3. Run the full test suite: for EACH active profile in `.kivax/config.yml` (in a monorepo there can be several, e.g. backend + frontend), its `cmd_test_unit` + `cmd_test_it` commands.
 4. Spec-first check: `kivax specfirst --json`. Every file in the `production` bucket must appear in the REQ→modules mapping in the ACTIVE feature's `plan.md` (path from `kivax feature show --json`); one that doesn't appear is a spec-first violation (code with no spec driving it) → NOT PASSING. The `legacy` (exempt via `legacy_globs`), `tests`, and `kivax` buckets aren't audited here.
 5. Lessons check: `kivax lessons check`. It computes which recorded lessons apply to this feature and fails when one of them isn't answered for in `plan.md` under `## Lessons applied`. Exit 1 is NOT PASSING, routed to tech-planner — the fix is a line in the plan saying how it was honored or why it doesn't apply, never deleting the lesson. **You don't judge whether a lesson was actually followed** (that's the reviewer's ground, reading the diff); you verify, mechanically, that nobody skipped past it in silence.
-6. Principles check (only if `PRINCIPLES.md` exists, `paths.principles` in config): read it and cross-check the actual diff against its stated principles — a judgment call, not something `kivax trace` computes. Any conflict is a `PRINCIPLES-VIOLATION:`, reported separately from the PASSING/NOT PASSING verdict (a change can be perfectly traceable and still violate a principle). This is the last-chance check — `kivax-plan` already checked the intended plan, this checks what was actually built.
+6. Principles check (only if `PRINCIPLES.md` exists): read it and cross-check the actual diff against its stated principles — a judgment call, not something `kivax trace` computes. Any conflict is a `PRINCIPLES-VIOLATION:`, reported separately from the PASSING/NOT PASSING verdict (a change can be perfectly traceable and still violate a principle). This is the last-chance check — `kivax-plan` already checked the intended plan, this checks what was actually built.
 7. Only if the traceability verdict is PASSING: `kivax trace --update-lock` (it rewrites the lock for EVERY feature, and refuses rather than drop entries it can't account for) and update the state with `kivax state`. A principles violation does NOT block the lock update by itself (traceability and principles compliance are independent concerns) — but it DOES stop the flow at the gate below regardless of `auto`/`human`.
 
 ### Hard rules

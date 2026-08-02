@@ -19,7 +19,7 @@ Read the `kivax-tasks` skill and follow it. Before starting, run `kivax task lis
 1. Read the `kivax-wiki-schema` skill (page schema and provenance).
 2. Read the indicated REQs from their owning feature's `spec.yml` (`kivax feature show --feature <NN> --json` resolves the path; `kivax hash --diff --json` maps each id to its feature) and the relevant sections of that feature's plan.
 3. Identify the domain concepts they touch (entities, invariants, rules). One page per concept, not per REQ: REQs are the sources, concepts are the pages.
-4. Create or update the affected pages: update their `sources:` frontmatter with `ID@hash` (current hash via `kivax hash`), interlink them with `[[concept]]` links, and update `_index.md` inside `paths.wiki` (`.kivax/config.yml`).
+4. Create or update the affected pages: update their `sources:` frontmatter with `ID@hash` (current hash via `kivax hash`), interlink them with `[[concept]]` links, and update `_index.md` at the root of the wiki directory.
 5. Run `kivax wiki lint` and fix whatever it reports.
 
 ### query <question>

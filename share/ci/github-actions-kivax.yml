@@ -5,7 +5,9 @@
 name: kivax-gate
 on:
   pull_request:
-    branches: [main]
+    # Kivax's flow opens feature PRs against the integration branch (gitflow's
+    # 'develop'); 'main' is here for the release PRs that merge into it.
+    branches: [develop, main]
 jobs:
   kivax-gate:
     runs-on: ubuntu-latest

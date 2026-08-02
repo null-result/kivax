@@ -23,7 +23,7 @@ def test_add_appends_items_as_todo_under_the_current_phase(ktask, feature, repo_
     assert call(ktask.main, "add", "researcher", "first step", "second step") == 0
     assert "Added 2 task(s)" in capsys.readouterr().out
     tasks = _state(repo_dir)["active"]["tasks"]
-    items = tasks["principles"]          # the feature's starting phase
+    items = tasks["spec"]          # the feature's starting phase
     assert [t["text"] for t in items] == ["first step", "second step"]
     assert {t["status"] for t in items} == {"todo"}
     assert {t["agent"] for t in items} == {"researcher"}
@@ -43,7 +43,7 @@ def test_commands_require_an_active_feature(ktask, project, call):
 def test_set_updates_status_and_note(ktask, feature, repo_dir, call):
     call(ktask.main, "add", "researcher", "a step")
     assert call(ktask.main, "set", "1", "doing", "--note", "half done") == 0
-    task = _state(repo_dir)["active"]["tasks"]["principles"][0]
+    task = _state(repo_dir)["active"]["tasks"]["spec"][0]
     assert task["status"] == "doing" and task["note"] == "half done"
 
 
@@ -108,7 +108,7 @@ def test_clear_drops_only_that_agents_items(ktask, feature, repo_dir, call):
     call(ktask.main, "add", "researcher", "r-step")
     call(ktask.main, "add", "spec-analyst", "s-step")
     assert call(ktask.main, "clear", "researcher") == 0
-    items = _state(repo_dir)["active"]["tasks"]["principles"]
+    items = _state(repo_dir)["active"]["tasks"]["spec"]
     assert [t["agent"] for t in items] == ["spec-analyst"]
 
 
@@ -120,11 +120,11 @@ def test_tasks_survive_archive_and_restore(ktask, kivax_cli, feature, repo_dir, 
     call(ktask.main, "set", "1", "doing", "--note", "keep me")
     call(kivax_cli.main, "feature", "new", "second", "--force")
 
-    archived = _state(repo_dir)["features"]["01"]["tasks"]["principles"]
+    archived = _state(repo_dir)["features"]["01"]["tasks"]["spec"]
     assert archived[0]["note"] == "keep me"
 
     call(kivax_cli.main, "feature", "switch", "01", "--force")
-    restored = _state(repo_dir)["active"]["tasks"]["principles"]
+    restored = _state(repo_dir)["active"]["tasks"]["spec"]
     assert restored[0]["status"] == "doing" and restored[0]["note"] == "keep me"
 
 

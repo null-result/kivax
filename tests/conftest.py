@@ -213,16 +213,6 @@ def use_store(monkeypatch, kivax_cli, store):
     monkeypatch.setattr(kivax_cli, "AGENT_RUNTIMES_CFG", store / "lib" / "agent_runtimes.yml")
     monkeypatch.setattr(kivax_cli, "AGENT_CACHE", store / "_generated" / "agents")
     monkeypatch.setattr(kivax_cli, "AGENT_CACHE_BODY", store / "_generated" / "orchestrator-body.md")
-    # KIND_UPSTREAM (used by 'kivax promote skill') is a MODULE-LEVEL dict
-    # literal built from RUNTIME once, at import time — patching RUNTIME above
-    # does not change it, since its values are already-concrete Path objects
-    # baked in before this fixture ever runs. Without rebuilding it here too,
-    # promoting a skill in a test writes into the REAL machine's ~/.kivax
-    # (whatever RUNTIME resolved to when bin/kivax was first imported), not
-    # the throwaway store. Rebuilt to mirror the module's own construction.
-    skill_runtimes = ("claude", "opencode", "cursor", "codex", "vscode-copilot", "copilot-cli")
-    monkeypatch.setattr(kivax_cli, "KIND_UPSTREAM",
-                        {"skill": {rt: store / "runtime" / "skills" for rt in skill_runtimes}})
     return store
 
 
@@ -230,7 +220,6 @@ def use_store(monkeypatch, kivax_cli, store):
 DEFAULT_INIT_ANSWERS = (
     "\n" + "\n" * 5           # runtimes: claude=default(yes), the rest default(no)
     + "y\n"                   # greenfield
-    + "\n"                    # principles+architecture: default yes
     + "\n"                    # features root: default 'specs'
     + "\n"                    # spec_language: default 'en'
     + "python-pytest\n"       # manual stack profile (no markers found under tmp_path)
@@ -238,15 +227,44 @@ DEFAULT_INIT_ANSWERS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def forge_cli_present(monkeypatch):
+    """`kivax doctor` requires gh or glab, because the flow ends by opening a
+    pull request and no git command can do that. Pinning it here keeps the
+    suite from depending on whether the machine running it happens to have one
+    installed — the tests that care about the check assert on _check_forge_cli
+    directly (tests/unit/test_cli_helpers.py)."""
+    import shutil
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which",
+                        lambda name, *a, **k: "/usr/bin/gh" if name == "gh"
+                        else real_which(name, *a, **k))
+
+
 @pytest.fixture
-def project(repo_dir, use_store, kivax_cli, call, feed_input):
-    """A project that has already been through 'kivax init' with every
-    default answer (greenfield, python-pytest, features at 'specs/')."""
+def uninitialized_project(repo_dir, use_store, kivax_cli, call, feed_input):
+    """Straight out of 'kivax init': config and runtime files in place, but
+    PRINCIPLES.md/ARCHITECTURE.md not written yet, so the project is still
+    waiting on the kivax-setup skill and refuses to start a feature."""
     feed_input(*DEFAULT_INIT_ANSWERS.split("\n")[:-1])
     rc = call(kivax_cli.main, "init")
     assert rc == 0, f"fixture setup: kivax init failed: {rc!r}"
     _git(repo_dir, "add", "-A")
     _git(repo_dir, "commit", "-qm", "install kivax")
+    return repo_dir
+
+
+@pytest.fixture
+def project(uninitialized_project):
+    """A project ready to work: 'kivax init' plus the one-time setup the
+    kivax-setup skill performs. Both documents are written by an assistant in
+    real use, so their content is irrelevant here — only that they exist, which
+    is what 'kivax feature new' gates on."""
+    repo_dir = uninitialized_project
+    (repo_dir / "PRINCIPLES.md").write_text("# Principles\n\n1. Spec first.\n", encoding="utf-8")
+    (repo_dir / "ARCHITECTURE.md").write_text("# Architecture\n\nOne module.\n", encoding="utf-8")
+    _git(repo_dir, "add", "-A")
+    _git(repo_dir, "commit", "-qm", "kivax setup")
     return repo_dir
 
 
@@ -316,25 +334,21 @@ def minimal_config():
     load_config()/an on-disk .kivax/config.yml."""
     def _cfg(**overrides) -> dict:
         base = {
-            "version": 2,
+            "version": 3,
             "runtimes": ["claude"],
             "spec_language": "en",
             "greenfield": True,
-            "pipeline": ["spec", "compile", "plan", "tdd", "it", "audit", "retro"],
-            "paths": {
-                "features": "specs", "wiki": "specs/wiki", "lessons": "specs/lessons",
-                "state": ".kivax/state.yml", "lock": ".kivax/traceability.lock.json",
-            },
-            "git": {"base_branch": "main", "branch_prefix": "kivax/"},
+            # 'features' is the only path a project sets; the rest are derived
+            # or fixed, so this dict mirrors what 'kivax init' actually writes.
+            "paths": {"features": "specs"},
+            "agents": {},
+            "git": {"base_branch": "main"},
             "legacy_globs": [],
-            "gates": {"spec": "human", "compile": "human", "plan": "human",
-                     "tdd": "auto", "it": "auto", "audit": "human", "retro": "human"},
             "stack": {"active": ["python-pytest"], "profiles": {
                 "python-pytest": {
                     "root": "", "test_globs": ["tests/**/*.py"],
                     "id_tag_regexes": [r'@pytest\.mark\.req\("(?P<id>(?:REQ|IT)-(?:\d{2,}-)?\d{3})"\)'],
                     "cmd_test_unit": "pytest -q", "cmd_test_it": "pytest -q -m it",
-                    "cmd_lint": "ruff check .",
                 },
             }},
         }

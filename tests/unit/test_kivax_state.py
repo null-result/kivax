@@ -124,11 +124,13 @@ def test_gate_configured_value(kstate, call, tmp_path, minimal_config, monkeypat
     assert capsys.readouterr().out.strip() == "auto"
 
 
-def test_gate_invalid_value_exits(kstate, call, tmp_path, minimal_config, monkeypatch):
-    cfg = minimal_config(gates={"spec": "maybe"})
+def test_gate_ignores_a_stale_gates_block(kstate, call, tmp_path, minimal_config,
+                                          monkeypatch, capsys):
+    """A project that still carries its old gates can't loosen the real one."""
+    cfg = minimal_config(gates={"spec": "auto"})
     monkeypatch.setattr(kstate, "load_config", lambda: (tmp_path, cfg))
-    rc = call(kstate.main, "gate", "spec")
-    assert isinstance(rc, str) and "must be 'human' or 'auto'" in rc
+    assert call(kstate.main, "gate", "spec") == 0
+    assert capsys.readouterr().out.strip() == "human"
 
 
 # --------------------------------------------------------------------------- main() — init removed
@@ -192,7 +194,7 @@ def test_next_phase_not_in_pipeline_exits(kstate, call, tmp_path, minimal_config
                                      "features": {}})
     monkeypatch.setattr(kstate, "load_config", lambda: (tmp_path, cfg))
     rc = call(kstate.main, "next")
-    assert isinstance(rc, str) and "is not in the pipeline" in rc
+    assert isinstance(rc, str) and "is not one of" in rc
 
 
 def test_next_without_active_exits(kstate, call, tmp_path, minimal_config, monkeypatch):

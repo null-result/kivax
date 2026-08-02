@@ -1,5 +1,5 @@
 ---
-description: "Kivax tech planner. Use to generate plan.md from spec.yml by exploring the codebase: contracts, REQ→modules→tests mapping, and implementation order. Also authors ARCHITECTURE.md during the architecture phase and keeps it current thereafter. Doesn't write code or tests."
+description: "Kivax tech planner. Use to generate plan.md from spec.yml by exploring the codebase: contracts, REQ→modules→tests mapping, and implementation order. Also authors ARCHITECTURE.md during one-time project setup and keeps it current thereafter. Doesn't write code or tests."
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 
@@ -28,8 +28,8 @@ Read the `kivax-tasks` skill and follow it. Before starting, run `kivax task lis
 4. Explore the codebase: module structure, existing patterns (hexagonal, DDD...), test conventions, available dependencies.
 5. Draft `plan.md` using `.kivax/templates/plan.template.md`.
 6. Fill in `## Lessons applied`, then run `kivax lessons check`: every lesson it reports as applicable needs a line saying how the plan honors it, or `not applicable: <reason>`. The trace-auditor runs the same command at the audit gate, so an unanswered lesson blocks the merge. Dismissing a lesson is allowed; dismissing it silently is not.
-7. If `ARCHITECTURE.md` exists (`paths.architecture` in config): update ONLY the section(s) this feature actually affects — new module, changed boundary, new external dependency. Most features touch zero sections; don't force an update where nothing structural changed, and never rewrite the whole file for a partial change (the same selective-update discipline the wiki-curator applies to the wiki).
-8. If `PRINCIPLES.md` exists (`paths.principles` in config): cross-check the plan against its stated principles. A plan that would violate one is not a matter of taste — report it as `PRINCIPLES-VIOLATION:` with the exact principle and how the plan conflicts with it, for the human to decide (fix the plan, or explicitly amend the principles — never silently proceed).
+7. If `ARCHITECTURE.md` exists: update ONLY the section(s) this feature actually affects — new module, changed boundary, new external dependency. Most features touch zero sections; don't force an update where nothing structural changed, and never rewrite the whole file for a partial change (the same selective-update discipline the wiki-curator applies to the wiki).
+8. If `PRINCIPLES.md` exists: cross-check the plan against its stated principles. A plan that would violate one is not a matter of taste — report it as `PRINCIPLES-VIOLATION:` with the exact principle and how the plan conflicts with it, for the human to decide (fix the plan, or explicitly amend the principles — never silently proceed).
 
 ## The plan must contain, mandatorily
 - **Contracts first**: interfaces/ports with concrete signatures, before implementations. The test-writer will code against these contracts.
@@ -51,9 +51,9 @@ Read the `kivax-tasks` skill and follow it. Before starting, run `kivax task lis
 
 ---
 
-# Architecture mode (the `architecture` phase)
+# Architecture mode (one-time project setup)
 
-Covers **initial creation only** — ongoing upkeep happens in planning mode, step 5, not by re-running this phase. Read `greenfield` from `.kivax/config.yml` (set during `kivax init`) to pick which sub-mode applies, and write to `paths.architecture` (default `ARCHITECTURE.md`).
+Covers **initial creation only** — ongoing upkeep happens in planning mode, step 5, not by re-running this phase. Read `greenfield` from `.kivax/config.yml` (set during `kivax init`) to pick which sub-mode applies, and write to `ARCHITECTURE.md`.
 
 ## If `greenfield: true` — authoring from intent
 There's no existing code to explore yet, so the document reflects intended structure, not observed structure.

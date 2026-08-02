@@ -56,8 +56,9 @@ def store(klessons, tmp_path, minimal_config, monkeypatch):
 
 
 # --------------------------------------------------------------------------- lessons_dir
-def test_lessons_dir_from_config(klessons, tmp_path):
-    assert klessons.lessons_dir(tmp_path, {"paths": {"lessons": "docs/lsn"}}) == tmp_path / "docs/lsn"
+def test_lessons_dir_derives_from_the_features_root(klessons, tmp_path):
+    cfg = {"paths": {"features": "docs/spec"}}
+    assert klessons.lessons_dir(tmp_path, cfg) == tmp_path / "docs/spec/lessons"
 
 
 def test_lessons_dir_falls_back_under_features(klessons, tmp_path):
@@ -297,7 +298,7 @@ def test_lint_catches_a_phase_outside_the_pipeline(klessons, call, store, capsys
     _lesson(root, "LSN-0001-x.md", phases="[deploy]")
     rc = call(klessons.main, "lint", "--strict")
     assert rc == 1
-    assert "not in this project's pipeline" in capsys.readouterr().out
+    assert "not in the Kivax pipeline" in capsys.readouterr().out
 
 
 def test_lint_requires_origin_feature(klessons, call, store, capsys):

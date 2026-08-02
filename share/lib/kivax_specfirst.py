@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-from kivax_lib import active_profiles, load_config
+from kivax_lib import active_profiles, load_config, paths_of
 
 
 def matches_any(path: str, globs: list[str]) -> bool:
@@ -62,12 +62,10 @@ def main() -> int:
         prefix = f"{p['root']}/" if p.get("root") else ""
         test_globs += [prefix + g for g in p.get("test_globs", [])]
 
-    paths_cfg = cfg.get("paths", {})
     # Paths that belong to the Kivax flow itself, not project code: the
     # project data folder (.kivax/), the agent/skill files Kivax copies in for
-    # each active runtime, the ambient context files, and any path explicitly
-    # declared under paths.* in the config (spec, plan, wiki, principles,
-    # architecture...).
+    # each active runtime, the ambient context files, and every path Kivax
+    # owns (features, wiki, lessons, state, lock, principles, architecture).
     #
     # .github/ is listed by its Kivax-owned subpaths only, never as a bare
     # prefix: that directory usually also holds CI workflows and issue
@@ -79,7 +77,7 @@ def main() -> int:
     # Directory-valued path entries get a trailing slash: `features: specs`
     # would otherwise make the bare prefix "specs" also swallow `specsomething/`,
     # letting real production files escape the audit.
-    for raw in paths_cfg.values():
+    for raw in paths_of(cfg).values():
         value = str(raw)
         kivax_prefixes.append(value if value.endswith("/") or Path(value).suffix
                               else value + "/")
