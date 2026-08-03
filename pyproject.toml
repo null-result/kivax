@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kivax"
+description = "A runtime for spec-anchored Spec-Driven Development"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "null-result" }]
+keywords = ["spec-driven-development", "sdd", "ai-agents", "claude-code", "traceability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["pyyaml>=6.0"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/null-result/kivax"
+Repository = "https://github.com/null-result/kivax"
+Issues = "https://github.com/null-result/kivax/issues"
+Changelog = "https://github.com/null-result/kivax/releases"
+
+[project.scripts]
+kivax = "kivax.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.5", "build>=1.2"]
+
+# One source of truth for the version: src/kivax/data/VERSION, which is also
+# what `kivax version` reads at runtime. Bumping that file is the whole release
+# prep — the wheel, the CLI, and the store can't disagree about which version
+# they are.
+[tool.setuptools.dynamic]
+version = { file = "src/kivax/data/VERSION" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The global store travels inside the wheel. Get this wrong and the checkout
+# still works perfectly while every installed copy fails on the first
+# `kivax init` — so the `package` job in .github/workflows/ci.yml builds the
+# wheel, inspects its contents, and installs it into a clean virtualenv.
+[tool.setuptools.package-data]
+kivax = ["data/**/*"]

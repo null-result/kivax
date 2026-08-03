@@ -5,27 +5,36 @@ it's laid out, and the few conventions that aren't obvious from reading the code
 
 ## Getting set up
 
-There is nothing to build and one dependency:
+One runtime dependency, and nothing to build:
 
 ```bash
 git clone https://github.com/null-result/kivax.git
 cd kivax
-python3 -m pip install pyyaml ruff pytest pytest-cov
+python3 -m pip install -e ".[dev]"
 ```
 
-Kivax is **not** a pip package. It's installed by cloning the repo and running
-`install.py`, which copies `share/` into a global store (`~/.kivax`) and links
-the CLI onto your PATH. The CLI runs directly from the checkout, so there's no
-packaging step to worry about.
+Kivax is a pip package with a `src/` layout. The editable install puts a
+`kivax` command on your PATH that runs the checkout directly, so your edits
+take effect immediately with no build step.
 
-To try your changes end to end, install into a throwaway store instead of your
-real one:
+The global store — the agents, skills, and templates that `kivax init` copies
+into a project — ships as package data at `src/kivax/data/`, so an editable
+install also picks up store edits immediately. That's the point of shipping it
+inside the package: the CLI and the store are one artifact and cannot drift.
+
+To try your changes end to end, work in a scratch repository:
 
 ```bash
-KIVAX_HOME=/tmp/kivax-dev python3 install.py
-export KIVAX_HOME=/tmp/kivax-dev
-cd /some/scratch/project && kivax init
+mkdir /tmp/scratch && cd /tmp/scratch && git init
+kivax init
 ```
+
+The test suite needs no install at all — `pytest.ini` puts `src/` on the path,
+so `pytest tests` works from a bare clone with just `pyyaml` and `pytest`.
+
+`KIVAX_HOME` still overrides the store's location. You rarely need it now that
+an editable install reads `src/kivax/data/` directly; it's there for anyone
+running a vendored or forked store.
 
 ## Running the checks
 
@@ -34,14 +43,14 @@ pytest tests                                                          # everythi
 pytest tests/unit                                                     # fast, no subprocess
 pytest tests/integration                                              # one CLI subcommand at a time
 pytest tests/e2e                                                      # full flows, some real subprocess
-pytest tests --cov=. --cov-config=.coveragerc --cov-report=term-missing  # the coverage gate (>= 90%, see .coveragerc)
-ruff check . bin/kivax                                                 # style and real-defect lint
+pytest tests --cov --cov-config=.coveragerc --cov-report=term-missing  # the coverage gate (>= 90%, see .coveragerc)
+ruff check .                                                           # style and real-defect lint
 ```
 
 The suite is organized by how much of the system a test touches:
 
-- **`tests/unit/`** — one function at a time. Library modules (`share/lib/*.py`)
-  are called directly with an in-memory `cfg` dict and a `tmp_path`; `bin/kivax`'s
+- **`tests/unit/`** — one function at a time. Library modules (`src/kivax/lib/*.py`)
+  are called directly with an in-memory `cfg` dict and a `tmp_path`; `cli.py`'s
   standalone helpers (`ask`, `find_source_files`, `_check_tag_regexes`, …) the
   same way.
 - **`tests/integration/`** — one `kivax` subcommand at a time (`init`, `feature`,
@@ -49,7 +58,7 @@ The suite is organized by how much of the system a test touches:
   `project`/`use_store` fixtures.
 - **`tests/e2e/`** — full multi-feature flows (the kind of session an agent
   actually runs), plus a handful of true subprocess invocations of the real
-  `bin/kivax` script as a sanity check independent of the in-process tests.
+  `python -m kivax` entry point as a sanity check independent of the in-process tests.
 
 Everything in `tests/unit` and `tests/integration`, and most of `tests/e2e`,
 calls `kivax_cli.main()` **in-process** — `sys.argv` and `builtins.input` are
@@ -66,42 +75,54 @@ fixture per module — `kstate`, `kvalidate`, `khash`, …), or use the
 `set_phase` fixture for the common "advance the active feature's phase" case.
 
 It builds a disposable global store and disposable git projects under
-`tmp_path`, and never touches your real machine: `install.py` itself — which
-symlinks into `~/.local/bin` — is exercised only by the separate `install`
-job in CI, on a disposable runner, never by the test suite.
+`tmp_path`, and never touches your real machine.
 
-`bin/kivax` is passed to ruff explicitly because it has no `.py` extension — it's
-meant to be executed directly.
+One thing the suite cannot check, by construction: that the **wheel** is
+correct. Every test runs against `src/` on `sys.path`, where a wrong
+`package-data` glob in `pyproject.toml` is invisible — the checkout works
+perfectly while every `pip install` produces a CLI with no store. That's the
+`package` job in CI: it builds the wheel, asserts its store file count matches
+the tree, installs it into a clean virtualenv, and drives a real `kivax init`
+from a temp directory. If you move anything under `src/kivax/data/`, that job
+is the one to watch.
 
 ## How the repository is laid out
 
 ```
-install.py       system-wide installer (copies share/ into ~/.kivax)
-bin/kivax        the CLI
-share/           everything that gets copied into the global store:
-  agents/          one canonical file per specialist, rendered per runtime
-  runtime/skills/  the phase-driver and reference skills (SKILL.md)
-  lib/             the kivax_*.py scripts the CLI dispatches to
-  templates/       scaffolds copied into each project
-  ci/              a SAMPLE CI gate for projects that USE Kivax
+pyproject.toml     packaging: console script, dependencies, package data
+src/kivax/
+  cli.py           the CLI
+  lib/             the kivax_*.py modules the CLI dispatches to
+  data/            THE GLOBAL STORE — package data, shipped in the wheel:
+    agents/          one canonical file per specialist, rendered per runtime
+    runtime/skills/  the phase-driver and reference skills (SKILL.md)
+    templates/       scaffolds copied into each project
+    ci/              a SAMPLE CI gate for projects that USE Kivax
+    stack_profiles.yml, agent_runtimes.yml, VERSION
 tests/
   conftest.py      shared fixtures — read its module docstring first
   unit/            one function at a time
   integration/     one CLI subcommand at a time
   e2e/             full flows, plus a few real-subprocess sanity checks
-pytest.ini         test discovery + markers
+pytest.ini         test discovery + markers + `pythonpath = src`
 .coveragerc        coverage scope and the 90% gate (`fail_under`)
 ```
 
-> `share/ci/github-actions-kivax.yml` is **not** this repository's CI. It's a
-> template that gets installed into your users' projects. This repo's own CI is
-> `.github/workflows/ci.yml`.
+> `src/kivax/data/ci/github-actions-kivax.yml` is **not** this repository's CI.
+> It's a template that gets installed into your users' projects. This repo's own
+> CI is `.github/workflows/ci.yml`.
+
+**Releasing.** Bump `src/kivax/data/VERSION` — it is the single source of truth
+for both the distribution version and what `kivax version` reports. Then publish
+a GitHub Release tagged `v<that version>`; `.github/workflows/release.yml` checks
+the tag against the file, builds, and publishes to PyPI via Trusted Publishing
+(no API token anywhere).
 
 ## The three conventions that matter
 
 **1. Agents and skills are documentation the assistant executes.** When you
-change the CLI or the flow, the corresponding files under `share/agents/` and
-`share/runtime/skills/` have to change with it. They tell the assistant which
+change the CLI or the flow, the corresponding files under `src/kivax/data/agents/`
+and `src/kivax/data/runtime/skills/` have to change with it. They tell the assistant which
 commands exist and what the ids look like, and drift there is invisible until
 someone hits it mid-session. The PR checklist has a line for this.
 
@@ -127,7 +148,7 @@ a hollow test to clear the gate.
 ## Style
 
 Ruff enforces it, configured permissively in `ruff.toml`: real defects, unused
-imports, and import order, not aesthetics. Run `ruff check . bin/kivax --fix`
+imports, and import order, not aesthetics. Run `ruff check . --fix`
 before pushing and you'll rarely think about it again.
 
 Beyond that, the codebase leans on comments that explain *why* rather than what,

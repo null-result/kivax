@@ -1,5 +1,6 @@
 [run]
 branch = True
+source = src/kivax
 omit =
     */tests/*
     */__pycache__/*
