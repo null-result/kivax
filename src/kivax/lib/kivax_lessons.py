@@ -47,7 +47,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from kivax_lib import (
+from .kivax_lib import (
     KNOWN_PHASES,
     TERMINAL_PHASE,
     active_feature,

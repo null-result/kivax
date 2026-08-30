@@ -1,7 +1,12 @@
-# Python bytecode — the CLI and lib/ scripts are run directly, never packaged,
-# so these are pure build noise (and install.py skips them when copying).
+# Python bytecode
 __pycache__/
 *.py[cod]
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
 
 # Local assistant/editor state — personal, not part of the project
 .claude/settings.local.json

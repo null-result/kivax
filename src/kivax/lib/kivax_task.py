@@ -35,8 +35,8 @@ status is the flow's public contract, and traceability reads it.
 import json
 import sys
 
-from kivax_lib import load_config
-from kivax_state import (
+from .kivax_lib import load_config
+from .kivax_state import (
     OPEN_TASK_STATES,
     TASK_STATES,
     load_state,

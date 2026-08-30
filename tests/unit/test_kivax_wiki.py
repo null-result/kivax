@@ -71,7 +71,7 @@ def test_lint_clean_wiki(kwiki, call, tmp_path, minimal_config, monkeypatch, spe
     spec_writer(tmp_path, "01", "booking")
     cfg = minimal_config()
     monkeypatch.setattr(kwiki, "load_config", lambda: (tmp_path, cfg))
-    import kivax_lib
+    from kivax.lib import kivax_lib
     h = kivax_lib.all_spec_hashes(tmp_path, cfg)["requirements"]["REQ-01-001"]
     _page(tmp_path, "booking.md", f"---\nconcept: booking\nsources:\n  - REQ-01-001@{h}\n---\n\n# Booking\n")
     rc = call(kwiki.main, "lint")
@@ -128,7 +128,7 @@ def test_lint_broken_reference_deprecated_id(kwiki, call, tmp_path, minimal_conf
         "integration_scenarios": [],
     }))
     monkeypatch.setattr(kwiki, "load_config", lambda: (tmp_path, cfg))
-    import kivax_lib
+    from kivax.lib import kivax_lib
     h = kivax_lib.all_spec_hashes(tmp_path, cfg)["requirements"]["REQ-01-001"]
     _page(tmp_path, "booking.md", f"---\nconcept: booking\nsources:\n  - REQ-01-001@{h}\n---\n\nx\n")
     call(kwiki.main, "lint")

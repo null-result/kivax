@@ -95,7 +95,7 @@ def test_list_shows_phase_and_active_marker(kivax_cli, project, call, capsys):
 
 def test_list_shows_stale_count(kivax_cli, project, repo_dir, spec_writer, call, capsys):
     spec_writer(repo_dir, "01", "booking")
-    from kivax_lib import all_spec_hashes, save_lock
+    from kivax.lib.kivax_lib import all_spec_hashes, save_lock
     cfg = yaml.safe_load((repo_dir / ".kivax/config.yml").read_text())
     hashes = all_spec_hashes(repo_dir, cfg)
     stale = {kind: {rid: {"hash": "sha256:0000000000000000", "tests": []} for rid in table}

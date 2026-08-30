@@ -10,19 +10,12 @@ true subprocess tests remain in tests/e2e/test_subprocess_sanity.py as a
 sanity check that the installed script itself runs; they aren't relied on
 for coverage.
 
-Every kivax_lib/kivax_validate/... module is imported exactly ONCE here, at
-collection time, from its real path under share/lib/. This matters: if the
-first `import kivax_lib` anywhere in the test run instead happened via
-bin/kivax's `_lib()` (which inserts a *copied* store's lib/ onto sys.path),
-Python would cache that copy as the module, and every line executed against
-it afterwards — including from unit tests that assumed they were importing
-the repo's own file — would be coverage-attributed to a temp-dir path that
-gets deleted at teardown. Importing everything here first, before any test
-runs, pins the module identity to the real repo files for the rest of the
-session.
+Everything is imported here as the ordinary package it is — `pytest.ini` puts
+`src/` on the path, so `kivax.cli` and `kivax.lib.*` resolve to the repo's own
+files whether or not the package is also installed in the environment. Pinning
+the imports at collection time still matters for coverage: it guarantees every
+line executed later is attributed to `src/kivax/...` rather than to a copy.
 """
-import importlib.machinery
-import importlib.util
 import shutil
 import subprocess
 import sys
@@ -31,50 +24,26 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kivax import cli as _kivax_cli_mod
+from kivax.lib import kivax_agents as _kivax_agents_mod
+from kivax.lib import kivax_hash as _kivax_hash_mod
+from kivax.lib import kivax_lessons as _kivax_lessons_mod
+from kivax.lib import kivax_lib as _kivax_lib_mod
+from kivax.lib import kivax_specfirst as _kivax_specfirst_mod
+from kivax.lib import kivax_state as _kivax_state_mod
+from kivax.lib import kivax_task as _kivax_task_mod
+from kivax.lib import kivax_trace as _kivax_trace_mod
+from kivax.lib import kivax_validate as _kivax_validate_mod
+from kivax.lib import kivax_wiki as _kivax_wiki_mod
+
 REPO = Path(__file__).resolve().parent.parent
-LIB_DIR = REPO / "share" / "lib"
-
-sys.path.insert(0, str(LIB_DIR))
-
-import kivax_hash as _kivax_hash_mod  # noqa: E402
-import kivax_lessons as _kivax_lessons_mod  # noqa: E402
-import kivax_specfirst as _kivax_specfirst_mod  # noqa: E402
-import kivax_task as _kivax_task_mod  # noqa: E402
-import kivax_trace as _kivax_trace_mod  # noqa: E402
-import kivax_validate as _kivax_validate_mod  # noqa: E402
-import kivax_wiki as _kivax_wiki_mod  # noqa: E402
-
-import kivax_agents as _kivax_agents_mod  # noqa: E402
-import kivax_lib as _kivax_lib_mod  # noqa: E402
-import kivax_state as _kivax_state_mod  # noqa: E402
-
-
-def _load_standalone(name: str, path: Path):
-    """Imports a file with no importable package context — needed for
-    bin/kivax (no .py suffix, so the default file finder can't infer a
-    loader for it — SourceFileLoader is passed explicitly) and install.py (a
-    top-level script, not part of the share/lib package)."""
-    loader = importlib.machinery.SourceFileLoader(name, str(path))
-    spec = importlib.util.spec_from_file_location(name, path, loader=loader)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    loader.exec_module(mod)
-    return mod
-
-
-_kivax_cli_mod = _load_standalone("kivax_cli", REPO / "bin" / "kivax")
-_install_mod = _load_standalone("kivax_install", REPO / "install.py")
+DATA_DIR = REPO / "src" / "kivax" / "data"
 
 
 # --------------------------------------------------------------------------- module fixtures
 @pytest.fixture
 def kivax_cli():
     return _kivax_cli_mod
-
-
-@pytest.fixture
-def kivax_install():
-    return _install_mod
 
 
 @pytest.fixture
@@ -189,30 +158,33 @@ def repo_dir(tmp_path, monkeypatch) -> Path:
 # --------------------------------------------------------------------------- global store
 @pytest.fixture
 def store(tmp_path) -> Path:
-    """A throwaway copy of share/+bin/kivax — never install.py, which
-    symlinks into ~/.local/bin and must not touch the real machine."""
+    """A throwaway copy of the packaged store (src/kivax/data), so a test that
+    writes into it can't damage the checkout."""
     dst = tmp_path / "store"
-    shutil.copytree(REPO / "share", dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    (dst / "bin").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO / "bin" / "kivax", dst / "bin" / "kivax")
+    shutil.copytree(DATA_DIR, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     return dst
 
 
 @pytest.fixture
 def use_store(monkeypatch, kivax_cli, store):
     """Points every one of kivax_cli's module-level path constants at a
-    throwaway store, the same way KIVAX_HOME env var would at import time —
+    throwaway store, the way the KIVAX_HOME env var would at import time —
     except these are set post-import, since the module is imported once for
-    the whole test session (see the module docstring)."""
+    the whole test session (see the module docstring).
+
+    LEGACY_STORE goes to a path that cannot exist: the stale-install warning
+    reads the real home directory, and whether the machine running the suite
+    happens to have a pre-2.1 ~/.kivax must not change any assertion."""
     monkeypatch.setattr(kivax_cli, "KIVAX_HOME", store)
-    monkeypatch.setattr(kivax_cli, "LIB", store / "lib")
     monkeypatch.setattr(kivax_cli, "RUNTIME", store / "runtime")
     monkeypatch.setattr(kivax_cli, "TEMPLATES", store / "templates")
-    monkeypatch.setattr(kivax_cli, "STACK_CATALOG", store / "lib" / "stack_profiles.yml")
+    monkeypatch.setattr(kivax_cli, "STACK_CATALOG", store / "stack_profiles.yml")
     monkeypatch.setattr(kivax_cli, "AGENTS_SRC", store / "agents")
-    monkeypatch.setattr(kivax_cli, "AGENT_RUNTIMES_CFG", store / "lib" / "agent_runtimes.yml")
+    monkeypatch.setattr(kivax_cli, "AGENT_RUNTIMES_CFG", store / "agent_runtimes.yml")
     monkeypatch.setattr(kivax_cli, "AGENT_CACHE", store / "_generated" / "agents")
     monkeypatch.setattr(kivax_cli, "AGENT_CACHE_BODY", store / "_generated" / "orchestrator-body.md")
+    monkeypatch.setattr(kivax_cli, "LEGACY_STORE", store / "no-legacy-install-here")
+    monkeypatch.delenv("KIVAX_HOME", raising=False)
     return store
 
 

@@ -1,9 +1,8 @@
 # Deliberately permissive: this gate exists to catch real defects and to stop
 # style being argued in review, not to reject a contribution over aesthetics.
 #
-# There is no pyproject.toml on purpose — Kivax isn't a pip package. It's
-# installed by cloning the repo and running install.py, and the CLI runs
-# straight from the checkout.
+# Kept as its own file rather than a [tool.ruff] table in pyproject.toml so the
+# lint config stays readable next to the reasoning for it.
 line-length = 110
 target-version = "py310"
 
@@ -22,12 +21,10 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-# The CLI is a single script by design (it must run from a bare checkout with
-# no package layout), so its imports inside functions are intentional.
-"bin/kivax" = ["E402"]
+# `from . import DATA_DIR` sits below the guarded PyYAML import, which has to
+# run first so a missing dependency produces the install hint rather than a
+# traceback from somewhere deeper.
+"src/kivax/cli.py" = ["E402"]
 
 [lint.isort]
-# The lib/ scripts import each other by bare module name (they run from the
-# global store, not as a package), so isort would otherwise file them under
-# third-party and merge them into the PyYAML import block.
-known-first-party = ["kivax_lib", "kivax_agents", "kivax_state"]
+known-first-party = ["kivax"]

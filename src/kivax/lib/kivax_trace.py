@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from kivax_lib import (
+from .kivax_lib import (
     active_profiles,
     all_spec_hashes,
     load_all_specs,

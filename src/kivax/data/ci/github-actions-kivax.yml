@@ -1,7 +1,6 @@
-# Kivax gate for CI. Copy this job into your workflow and adjust the way
-# kivax is installed to however you distribute it (internal artifact, submodule, custom script).
-# This example assumes an install.py reachable from your own infrastructure;
-# adjust the path/URL before using it.
+# Kivax gate for CI. Copy this job into your workflow as-is — it runs against
+# the published package, so there is nothing to adjust unless you pin a version
+# or install from somewhere private.
 name: kivax-gate
 on:
   pull_request:
@@ -15,10 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
-      # --- install kivax on the runner (adjust to your distribution) ---
-      # - run: curl -fsSL https://your-internal-artifacts/kivax/install.py | python3
-      # - run: echo "$HOME/.kivax/bin" >> "$GITHUB_PATH"
+      # Pin the version (kivax==2.1.0) if you'd rather a Kivax release never
+      # changes what this gate accepts without you choosing it.
+      - run: pip install kivax
       # Both commands span EVERY feature's spec, not just the one this PR
       # touches: that's the anchoring guarantee. A failure naming a feature
       # unrelated to this PR means its spec drifted from its tests and needs
