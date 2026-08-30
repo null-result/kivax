@@ -53,7 +53,7 @@ def test_diff_text_output(khash, call, tmp_path, minimal_config, monkeypatch, sp
 
 
 def test_diff_no_pending_work_returns_0(khash, call, tmp_path, minimal_config, monkeypatch, spec_writer):
-    from kivax_lib import all_spec_hashes, save_lock
+    from kivax.lib.kivax_lib import all_spec_hashes, save_lock
     spec_writer(tmp_path, "01", "booking")
     cfg = minimal_config()
     hashes = all_spec_hashes(tmp_path, cfg)

@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from kivax_lib import (
+from .kivax_lib import (
     PIPELINE,
     TERMINAL_PHASE,
     active_feature,

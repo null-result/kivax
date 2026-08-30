@@ -84,7 +84,7 @@ def test_orphaned_test_tag(ktrace, call, tmp_path, minimal_config, monkeypatch, 
 
 def test_stale_hash_names_owning_feature(ktrace, call, tmp_path, minimal_config, monkeypatch,
                                          spec_writer, capsys):
-    from kivax_lib import all_spec_hashes, save_lock
+    from kivax.lib.kivax_lib import all_spec_hashes, save_lock
     cfg = _setup(tmp_path, minimal_config, monkeypatch, ktrace, spec_writer)
     _tag_file(tmp_path, "tests/test_a.py", ["REQ-01-001", "IT-01-001"])
     hashes = all_spec_hashes(tmp_path, cfg)
@@ -125,7 +125,7 @@ def test_update_lock_writes_and_keeps_every_feature(ktrace, call, tmp_path, mini
     assert rc == 0
     out = capsys.readouterr().out
     assert "2 feature(s)" in out
-    from kivax_lib import load_lock
+    from kivax.lib.kivax_lib import load_lock
     lock = load_lock(tmp_path, cfg)
     assert set(lock["requirements"]) == {"REQ-01-001", "REQ-02-001"}
 
@@ -138,7 +138,7 @@ def test_update_lock_refuses_to_drop_still_declared_ids(ktrace, call, tmp_path, 
     than silently drop the other feature's still-declared ids. Simulated by
     monkeypatching `all_spec_hashes` alone — `load_all_specs` (which `known`
     is built from) stays real, so the two diverge exactly like the bug would."""
-    import kivax_lib
+    from kivax.lib import kivax_lib
     cfg = minimal_config()
     spec_writer(tmp_path, "01", "booking")
     spec_writer(tmp_path, "02", "cancel")
@@ -164,7 +164,7 @@ def test_update_lock_refuses_to_drop_still_declared_ids(ktrace, call, tmp_path, 
 
 def test_update_lock_refuses_to_drop_undeclared_ids(ktrace, call, tmp_path, minimal_config, monkeypatch,
                                                      spec_writer, capsys):
-    import kivax_lib
+    from kivax.lib import kivax_lib
     cfg = minimal_config()
     spec_writer(tmp_path, "01", "booking")
     monkeypatch.setattr(ktrace, "load_config", lambda: (tmp_path, cfg))

@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-from kivax_lib import active_profiles, load_config, paths_of
+from .kivax_lib import active_profiles, load_config, paths_of
 
 
 def matches_any(path: str, globs: list[str]) -> bool:

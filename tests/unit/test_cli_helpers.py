@@ -1,6 +1,9 @@
-"""Unit tests for the standalone helper functions in bin/kivax — the parts
+"""Unit tests for the standalone helper functions in kivax/cli.py — the parts
 that don't need a scaffolded project or store (see tests/integration/ for the
 cmd_* subcommands, which do)."""
+import sys
+from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -67,7 +70,7 @@ def test_sh_returns_empty_on_nonzero_exit(kivax_cli, tmp_path):
 
 # --------------------------------------------------------------------------- require_kivax_home / require_project
 def test_require_kivax_home_missing_exits(kivax_cli, use_store, monkeypatch, tmp_path):
-    monkeypatch.setattr(kivax_cli, "LIB", tmp_path / "nowhere")
+    monkeypatch.setattr(kivax_cli, "AGENTS_SRC", tmp_path / "nowhere")
     with pytest.raises(SystemExit, match="can't find the Kivax global store"):
         kivax_cli.require_kivax_home()
 
@@ -290,3 +293,56 @@ def test_check_tag_regexes_multiple_profiles_list_form(kivax_cli):
 
 def test_check_tag_regexes_no_active_profiles(kivax_cli):
     assert kivax_cli._check_tag_regexes({}) == []
+
+
+# --------------------------------------------------------------------------- legacy install detection
+def _make_legacy_store(root):
+    """The shape install.py used to leave behind: a store with lib/kivax_lib.py."""
+    (root / "lib").mkdir(parents=True)
+    (root / "lib" / "kivax_lib.py").write_text("# pre-2.1 store\n", encoding="utf-8")
+    return root
+
+
+def test_no_warning_when_there_is_no_legacy_store(kivax_cli, use_store):
+    assert kivax_cli._check_legacy_install() == []
+
+
+def test_legacy_store_is_reported(kivax_cli, monkeypatch, tmp_path):
+    legacy = _make_legacy_store(tmp_path / ".kivax")
+    monkeypatch.delenv("KIVAX_HOME", raising=False)
+    monkeypatch.setattr(kivax_cli, "LEGACY_STORE", legacy)
+    monkeypatch.setattr(kivax_cli.shutil, "which", lambda name, *a, **k: None)
+    problems = kivax_cli._check_legacy_install()
+    assert len(problems) == 1
+    assert str(legacy) in problems[0] and "no longer used" in problems[0]
+
+
+def test_legacy_store_ignored_when_kivax_home_is_set(kivax_cli, monkeypatch, tmp_path):
+    """KIVAX_HOME means the user chose their own store on purpose; ~/.kivax
+    being present is then their business, not a leftover to nag about."""
+    legacy = _make_legacy_store(tmp_path / ".kivax")
+    monkeypatch.setenv("KIVAX_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(kivax_cli, "LEGACY_STORE", legacy)
+    assert kivax_cli._check_legacy_install() == []
+
+
+def test_legacy_cli_shadowing_the_installed_one_is_called_out(kivax_cli, monkeypatch, tmp_path):
+    legacy = _make_legacy_store(tmp_path / ".kivax")
+    shadow = tmp_path / "bin" / "kivax"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.delenv("KIVAX_HOME", raising=False)
+    monkeypatch.setattr(kivax_cli, "LEGACY_STORE", legacy)
+    monkeypatch.setattr(kivax_cli.shutil, "which", lambda name, *a, **k: str(shadow))
+    assert "shadows the installed CLI" in kivax_cli._check_legacy_install()[0]
+
+
+def test_cli_inside_the_current_prefix_is_not_a_shadow(kivax_cli, monkeypatch, tmp_path):
+    """A `kivax` resolving inside sys.prefix IS the installed one — warning
+    about it would tell every correctly-installed user to delete their CLI."""
+    legacy = _make_legacy_store(tmp_path / ".kivax")
+    installed = Path(sys.prefix) / "bin" / "kivax"
+    monkeypatch.delenv("KIVAX_HOME", raising=False)
+    monkeypatch.setattr(kivax_cli, "LEGACY_STORE", legacy)
+    monkeypatch.setattr(kivax_cli.shutil, "which", lambda name, *a, **k: str(installed))
+    assert "shadows the installed CLI" not in kivax_cli._check_legacy_install()[0]

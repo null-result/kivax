@@ -73,8 +73,10 @@ jobs:
       - name: Run the test suite with coverage
         # .coveragerc sets `fail_under = 90` — this fails the step (and the
         # job) the moment coverage drops under that, independent of whether
-        # every individual test passed.
-        run: pytest tests --cov=. --cov-config=.coveragerc --cov-report=term-missing
+        # every individual test passed. `source` is pinned in .coveragerc to
+        # src/kivax so the percentage measures the shipped package and not
+        # whatever else happens to sit in the working directory.
+        run: pytest tests --cov --cov-config=.coveragerc --cov-report=term-missing
 
       - name: Upload coverage report
         if: always()
@@ -84,18 +86,21 @@ jobs:
           path: htmlcov/
           if-no-files-found: ignore
 
-  install:
-    # install.py is the very first thing every user runs, and it symlinks
-    # into ~/.local/bin — something a test in the suite above deliberately
-    # never does, since that would touch whichever machine runs it. A
-    # disposable CI runner is the right place to exercise it for real,
-    # symlink included.
-    name: install.py (${{ matrix.os }})
+  package:
+    # The test suite runs against src/ on sys.path, which cannot tell you
+    # whether the WHEEL is correct: a wrong package-data glob leaves the
+    # checkout working perfectly while every `pip install` produces a CLI with
+    # no store. So build it, look inside it, and then use it from a clean
+    # virtualenv that has no access to the repo.
+    name: package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -103,38 +108,95 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install into the default location
+      - name: Build the sdist and the wheel
         run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          python3 install.py
+          python -m pip install --upgrade pip build
+          python -m build
 
-      - name: The CLI is on PATH and reports a version
+      - name: The wheel actually contains the global store
+        # Counting matters as much as presence: a glob that catches
+        # agents/*.md but misses runtime/skills/**/SKILL.md would still put
+        # "some" data in the wheel and fail at the first phase transition.
         run: |
-          kivax version
-          kivax version | grep -q "version: "
+          python - <<'PY'
+          import sys, zipfile, pathlib
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          names = set(zipfile.ZipFile(wheel).namelist())
+          required = [
+              "kivax/cli.py", "kivax/lib/kivax_lib.py",
+              "kivax/data/VERSION", "kivax/data/stack_profiles.yml",
+              "kivax/data/agent_runtimes.yml", "kivax/data/agents/orchestrator.md",
+              "kivax/data/templates/spec.template.yml",
+              "kivax/data/runtime/skills/kivax-setup/SKILL.md",
+              "kivax/data/ci/github-actions-kivax.yml",
+          ]
+          missing = [r for r in required if r not in names]
+          on_disk = sum(1 for p in pathlib.Path("src/kivax/data").rglob("*") if p.is_file())
+          packed = sum(1 for n in names if n.startswith("kivax/data/"))
+          print(f"{wheel.name}: {packed} store files packed, {on_disk} on disk")
+          if missing:
+              sys.exit("missing from the wheel:\n  " + "\n  ".join(missing))
+          if packed != on_disk:
+              sys.exit(f"wheel has {packed} store files but the tree has {on_disk}")
+          PY
 
-      - name: A fresh project initializes and passes doctor
+      - name: Install the wheel into a clean virtualenv and drive it
+        # Run from a temp directory so nothing can resolve against the
+        # checkout: this must exercise the installed package alone.
         run: |
+          python -m venv /tmp/kivax-venv
+          if [ -d /tmp/kivax-venv/Scripts ]; then VBIN=/tmp/kivax-venv/Scripts; else VBIN=/tmp/kivax-venv/bin; fi
+          "$VBIN/python" -m pip install --upgrade pip
+          "$VBIN/python" -m pip install dist/*.whl
+          "$VBIN/kivax" version
+          "$VBIN/kivax" version | grep -q "version: "
+          # The store path it reports must be inside the venv, not the repo —
+          # that's the whole claim of shipping the store in the package.
+          "$VBIN/kivax" version | grep "kivax store:" | grep -q "kivax-venv"
+
           mkdir -p /tmp/demo && cd /tmp/demo
           git init -q .
           git config user.email ci@example.invalid
           git config user.name CI
           # runtimes(6, defaults) / greenfield=y / features root / language /
           # stack profile / base branch
-          printf '\n\n\n\n\n\ny\n\n\npython-pytest\n\n' | kivax init
+          printf '\n\n\n\n\n\ny\n\n\npython-pytest\n\n' | "$VBIN/kivax" init
           test -d specs
           test ! -f specs/spec.md   # no feature exists yet at init time
           # Project setup is a precondition of the first feature, and it's the
           # kivax-setup skill (i.e. an assistant) that writes these two. No
           # assistant here, so assert the refusal, then stand in for it.
-          ! kivax feature new checkout
-          kivax feature new checkout 2>&1 | grep -q "hasn't been set up yet"
+          # Captured, not piped: `shell: bash` (needed for the Windows leg of
+          # this matrix) turns on pipefail, and a pipeline whose first command
+          # fails ON PURPOSE would then fail the step. One invocation asserts
+          # both halves — that it refuses, and that it says why.
+          if refusal="$("$VBIN/kivax" feature new checkout 2>&1)"; then
+            echo "expected 'feature new' to be refused before project setup, got success:"
+            echo "$refusal"
+            exit 1
+          fi
+          echo "$refusal"
+          echo "$refusal" | grep -q "hasn't been set up yet"
           printf '# Principles\n' > PRINCIPLES.md
           printf '# Architecture\n' > ARCHITECTURE.md
-          kivax feature new checkout
+          "$VBIN/kivax" feature new checkout
           test -f specs/01-checkout/spec.md
-          kivax doctor
+          "$VBIN/kivax" doctor
+          # A passthrough subcommand re-execs `python -m kivax.lib.…`; nothing
+          # else here would catch that exec breaking under a real install.
+          "$VBIN/kivax" validate
+
+      - name: Check the distribution metadata
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+
+      - name: Keep the distributions for inspection
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
   lint:
     name: lint
@@ -147,9 +209,7 @@ jobs:
       - name: Install ruff
         run: python -m pip install --upgrade pip ruff
       - name: Lint
-        # bin/kivax is passed explicitly: it has no .py extension (it's meant to
-        # be executed directly), so ruff's discovery wouldn't pick it up.
-        run: ruff check . bin/kivax
+        run: ruff check .
 
   commitlint:
     # Enforces Conventional Commits (see commitlint.config.js) on every commit
@@ -165,14 +225,14 @@ jobs:
 
   required-checks:
     # The branch ruleset requires exactly this one context. Matrix jobs
-    # (test, install) produce a different check name per OS/Python
+    # (test, package) produce a different check name per OS/Python
     # combination, which is brittle to require directly — add a Python
     # version and you'd have to remember to update the ruleset too. This
     # job aggregates all of them into one stable name instead.
     name: required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [test, coverage, install, lint, commitlint]
+    needs: [test, coverage, package, lint, commitlint]
     steps:
       - name: Fail if any required job failed
         run: |

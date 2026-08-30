@@ -178,7 +178,7 @@ def test_invalid_yaml_spec_reported(kivax_cli, project, repo_dir, call, capsys):
 
 def test_stranded_lock_ids_reported(kivax_cli, project, repo_dir, spec_writer, call, capsys):
     spec_writer(repo_dir, "01", "booking")
-    from kivax_lib import all_spec_hashes, save_lock
+    from kivax.lib.kivax_lib import all_spec_hashes, save_lock
     cfg = yaml.safe_load((repo_dir / ".kivax/config.yml").read_text())
     hashes = all_spec_hashes(repo_dir, cfg)
     hashes["requirements"]["REQ-99-001"] = "sha256:0000000000000000"

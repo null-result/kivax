@@ -12,7 +12,7 @@ The diff classifies each ID as: unchanged | modified | new | removed.
 import json
 import sys
 
-from kivax_lib import all_spec_hashes, feature_number_of_id, load_config, load_lock, owner_of
+from .kivax_lib import all_spec_hashes, feature_number_of_id, load_config, load_lock, owner_of
 
 
 def compute_diff(current: dict, lock: dict) -> dict:

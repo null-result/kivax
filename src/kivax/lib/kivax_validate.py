@@ -11,7 +11,7 @@ Usage: kivax validate
 import re
 import sys
 
-from kivax_lib import feature_number_of_id, load_all_specs, load_config
+from .kivax_lib import feature_number_of_id, load_all_specs, load_config
 
 # The canonical id form carries the owning feature's number: REQ-01-001,
 # AC-01-001-01, IT-01-001. The VALIDATOR is strict about this, while the tag

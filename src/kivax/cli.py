@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """kivax — Kivax CLI (spec-anchored SDD flow).
 
 Usage:
@@ -32,8 +31,11 @@ Usage:
   kivax validate|hash|trace|state|task|wiki|lessons|specfirst [args...]
                               Passes control to the matching script.
 
-KIVAX_HOME (default ~/.kivax) must point to the global store created by
-install.py.
+The global store — the agents, skills, templates, and stack catalog that init
+and upgrade materialize into a project — ships inside the installed package,
+so 'pip install --upgrade kivax' updates the CLI and the store as one thing.
+KIVAX_HOME overrides it, which is how a contributor points the CLI at a
+checkout's src/kivax/data.
 
 Design note: Kivax owns the workflow. The phase sequence, the approval gates,
 and the specialist agents that run each phase are fixed — they're what the tool
@@ -43,23 +45,57 @@ same flow, but don't edit them, because 'kivax upgrade' replaces them wholesale.
 Everything a project genuinely needs to decide lives in .kivax/config.yml — and
 that includes which model each agent runs on, via the 'agents:' block.
 """
+import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 try:
     import yaml
-except ImportError:
-    sys.exit("ERROR: PyYAML is missing. Install with: pip install pyyaml --break-system-packages")
+except ImportError:  # pragma: no cover - pip guarantees it; a broken env doesn't
+    sys.exit("ERROR: PyYAML is missing. Reinstall Kivax: pipx install --force kivax")
 
-KIVAX_HOME = Path(os.environ.get("KIVAX_HOME", str(Path.home() / ".kivax")))
-LIB = KIVAX_HOME / "lib"
+from . import DATA_DIR
+
+
+def _default_store() -> Path:
+    """Where the global store lives.
+
+    Normally it's the `data/` directory inside this installed package, which is
+    what makes `pip install --upgrade kivax` the entire upgrade path: the CLI
+    and the store it reads ship as one artifact, so they cannot drift apart.
+    KIVAX_HOME still overrides it — that's the contributor flow (point it at a
+    checkout's src/kivax/data) and the escape hatch for anyone vendoring a
+    modified store."""
+    env = os.environ.get("KIVAX_HOME")
+    return Path(env).expanduser() if env else DATA_DIR
+
+
+def _cache_root() -> Path:
+    """A writable directory for derived files.
+
+    The packaged store lives in site-packages, which must be treated as
+    read-only, so the rendered-agent cache can't go there. When KIVAX_HOME is
+    set the user has handed us a writable store of their own, and keeping the
+    cache inside it means two stores (a checkout and the installed package)
+    never share one cache and serve each other stale renders."""
+    if os.environ.get("KIVAX_HOME"):
+        return KIVAX_HOME
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "kivax"
+
+
+KIVAX_HOME = _default_store()
 RUNTIME = KIVAX_HOME / "runtime"
 TEMPLATES = KIVAX_HOME / "templates"
-STACK_CATALOG = LIB / "stack_profiles.yml"
+STACK_CATALOG = KIVAX_HOME / "stack_profiles.yml"
 
 # Agents are not stored pre-rendered per runtime: AGENTS_SRC holds one
 # canonical file per specialist (description + tools + body only), and
@@ -67,11 +103,16 @@ STACK_CATALOG = LIB / "stack_profiles.yml"
 # AGENT_CACHE is where they get rendered into on every 'init'/'upgrade' —
 # regenerated fresh each time, never hand-edited.
 AGENTS_SRC = KIVAX_HOME / "agents"
-AGENT_RUNTIMES_CFG = LIB / "agent_runtimes.yml"
-AGENT_CACHE = KIVAX_HOME / "_generated" / "agents"
+AGENT_RUNTIMES_CFG = KIVAX_HOME / "agent_runtimes.yml"
+AGENT_CACHE = _cache_root() / "_generated" / "agents"
 # Body-only orchestrator for AGENTS.md / copilot-instructions.md (runtimes that
 # use an ambient context file instead of a dedicated agent directory).
-AGENT_CACHE_BODY = KIVAX_HOME / "_generated" / "orchestrator-body.md"
+AGENT_CACHE_BODY = _cache_root() / "_generated" / "orchestrator-body.md"
+
+# Where install.py used to put the store, before Kivax was a pip package.
+# Only read to warn that it's stale — never written to. A module constant so
+# the suite can point it somewhere harmless instead of the real home dir.
+LEGACY_STORE = Path.home() / ".kivax"
 
 
 def agent_names() -> list[str]:
@@ -113,8 +154,7 @@ def models_of(cfg: dict) -> dict[str, str]:
 
 
 def regenerate_agents(models: dict[str, str] | None = None) -> None:
-    sys.path.insert(0, str(LIB))
-    import kivax_agents
+    from .lib import kivax_agents
     cfg = kivax_agents.load_runtime_configs(AGENT_RUNTIMES_CFG)
     kivax_agents.generate_all(AGENTS_SRC, cfg, AGENT_CACHE, models or {})
     # Strip frontmatter from the orchestrator for runtimes that need a plain
@@ -134,16 +174,14 @@ CONFIG_VERSION = 3
 
 
 def klib_pipeline() -> list[str]:
-    """The per-feature phase sequence, from the global store's kivax_lib."""
-    sys.path.insert(0, str(LIB))
-    from kivax_lib import PIPELINE
+    """The per-feature phase sequence, from kivax_lib."""
+    from .lib.kivax_lib import PIPELINE
     return PIPELINE
 
 
 def klib_setup_phases() -> list[str]:
-    """The one-time project setup phases, from the global store's kivax_lib."""
-    sys.path.insert(0, str(LIB))
-    from kivax_lib import SETUP_PHASES
+    """The one-time project setup phases, from kivax_lib."""
+    from .lib.kivax_lib import SETUP_PHASES
     return SETUP_PHASES
 
 # (key, human label, default answer) — key is what ends up in .kivax/config.yml's
@@ -208,10 +246,18 @@ def sh(cmd: list[str], cwd: Path) -> str:
 
 
 def require_kivax_home() -> None:
-    if not (LIB / "kivax_lib.py").is_file():
-        sys.exit(f"ERROR: can't find the Kivax global store at {KIVAX_HOME}.\n"
-                 f"Did you run install.py? If you installed it elsewhere, export "
-                 f"KIVAX_HOME=<path> before invoking kivax.")
+    """The store normally ships inside the package, so this can only fail when
+    KIVAX_HOME points somewhere wrong — or, rarely, when an installer dropped
+    the package data."""
+    # The orchestrator is the sentinel, not VERSION: it's the agent the whole
+    # flow enters through, so a store without it is unusable, whereas a store
+    # without VERSION merely can't name itself ('kivax version' says unknown).
+    if not (AGENTS_SRC / "orchestrator.md").is_file():
+        hint = (f"KIVAX_HOME is set to {os.environ['KIVAX_HOME']!r}, which isn't a Kivax "
+                f"store. Unset it to use the one that ships with the package."
+                if os.environ.get("KIVAX_HOME") else
+                "Reinstall Kivax: pipx install --force kivax")
+        sys.exit(f"ERROR: can't find the Kivax global store at {KIVAX_HOME}.\n{hint}")
 
 
 def require_project() -> tuple[Path, dict]:
@@ -636,10 +682,9 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def _lib():
-    """The lib modules, imported from the global store on demand."""
-    sys.path.insert(0, str(LIB))
-    import kivax_lib
-    import kivax_state
+    """The lib modules, imported on demand — they pull in PyYAML and are only
+    needed by the subcommands that touch specs."""
+    from .lib import kivax_lib, kivax_state
     return kivax_lib, kivax_state
 
 
@@ -893,8 +938,8 @@ def _check_features(root: Path, cfg: dict) -> list[str]:
     problems: list[str] = []
     try:
         klib, kstate = _lib()
-    except ImportError as e:  # pragma: no cover - broken store
-        return [f"can't import the Kivax lib from {LIB}: {e}"]
+    except ImportError as e:  # pragma: no cover - broken install
+        return [f"can't import the Kivax lib: {e}"]
 
     paths = cfg.get("paths", {}) or {}
     if "features" not in paths:
@@ -1040,7 +1085,6 @@ FORGE_CLIS = ("gh", "glab")
 
 
 def _check_forge_cli() -> list[str]:
-    import shutil
     if any(shutil.which(cli) for cli in FORGE_CLIS):
         return []
     return ["no forge CLI on PATH (looked for: " + ", ".join(FORGE_CLIS) + "). "
@@ -1097,7 +1141,6 @@ def cmd_doctor(argv: list[str]) -> int:
             problems.append(f"agents.{name} in config.yml isn't a Kivax agent. "
                             f"Known: {', '.join(sorted(known_agents))}")
 
-    sys.path.insert(0, str(LIB))
     pipeline = klib_pipeline()
     runtimes = cfg.get("runtimes", [])
     dir_checks = {
@@ -1160,12 +1203,15 @@ def cmd_doctor(argv: list[str]) -> int:
 
     problems += _check_features(root, cfg)
     problems += _check_forge_cli()
+    # A warning, not a problem: it says nothing about THIS project, and doctor's
+    # exit code is what CI gates on.
+    for line in _check_legacy_install():
+        print(f"WARNING: {line}")
 
     # Not a problem on a freshly-init'd project — it's the next step. It only
     # becomes one once features exist, which means someone wrote a spec against
     # principles and an architecture that were never written down.
-    sys.path.insert(0, str(LIB))
-    from kivax_lib import list_features, paths_of, pending_setup
+    from .lib.kivax_lib import list_features, paths_of, pending_setup
     pending = pending_setup(root, cfg)
     if pending:
         missing = ", ".join(paths_of(cfg)[p] for p in pending)
@@ -1191,15 +1237,42 @@ def cmd_version(argv: list[str]) -> int:
     v = KIVAX_HOME / "VERSION"
     print(f"kivax store: {KIVAX_HOME}")
     print(f"version: {v.read_text(encoding='utf-8').strip() if v.is_file() else 'unknown'}")
+    for line in _check_legacy_install():
+        print(f"\nWARNING: {line}")
     return 0
 
 
+def _check_legacy_install() -> list[str]:
+    """Kivax used to be installed by cloning the repo and running install.py,
+    which copied a store to ~/.kivax and symlinked a `kivax` script into
+    ~/.local/bin or /usr/local/bin. Those files outlive a `pip install`, and if
+    the old symlink sits earlier on PATH it keeps winning — so the user edits
+    a spec with a new Kivax and runs an old one. Say so rather than let them
+    debug a version that doesn't match the one they installed."""
+    if os.environ.get("KIVAX_HOME") or not (LEGACY_STORE / "lib" / "kivax_lib.py").is_file():
+        return []
+    msg = (f"a pre-2.1 installation is still at {LEGACY_STORE} (left by the old "
+           f"install.py). It's no longer used — Kivax now ships its store inside "
+           f"the package. Remove it with: rm -rf {LEGACY_STORE}")
+    shadow = shutil.which("kivax")
+    if shadow and not Path(shadow).resolve().is_relative_to(Path(sys.prefix)):
+        msg += (f"\n  '{shadow}' also shadows the installed CLI on your PATH — "
+                f"delete it too, or this warning is the last thing you'll see "
+                f"from the new version.")
+    return [msg]
+
+
 def cmd_passthrough(name: str, argv: list[str]) -> int:
+    """Hands the subcommand to its lib module as a fresh process.
+
+    Still an exec rather than a call: these modules own their own exit codes
+    and argument parsing, and replacing the process image keeps that contract
+    exactly as it was when they were standalone scripts in the store."""
     require_kivax_home()
-    script = LIB / f"kivax_{name}.py"
-    if not script.is_file():
-        sys.exit(f"ERROR: no script found for '{name}' in {LIB}")
-    os.execv(sys.executable, [sys.executable, str(script), *argv])
+    module = f"{__package__}.lib.kivax_{name}"
+    if importlib.util.find_spec(module) is None:
+        sys.exit(f"ERROR: no module found for '{name}' ({module})")
+    os.execv(sys.executable, [sys.executable, "-m", module, *argv])
 
 
 def main() -> int:

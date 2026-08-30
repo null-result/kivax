@@ -20,9 +20,7 @@ Works with **Claude Code**, **opencode**, **Cursor**, **GitHub Copilot** (in VS 
 ## Quick start
 
 ```bash
-git clone https://github.com/null-result/kivax.git
-cd kivax
-python3 install.py
+pipx install kivax
 ```
 
 Then, at the root of the project you want to work on:
@@ -37,31 +35,39 @@ Answer the wizard, then open your AI assistant in that project and ask it to **s
 
 ## Prerequisites
 
-- **Python 3.10 or later**, with `pip` available (used to install PyYAML if it's missing).
+- **Python 3.10 or later.** Kivax is a pip package; its one dependency (PyYAML) is installed with it.
 - **git** — Kivax's traceability model diffs your branch against a base branch, so run `kivax init` inside a git repository, at its root.
 - **A forge CLI: [`gh`](https://cli.github.com) or [`glab`](https://gitlab.com/gitlab-org/cli)**, authenticated (`gh auth login`). The flow ends by opening a pull request, and a pull request is a forge concept, not a git one — no git command creates one. `kivax doctor` checks for it.
 - **At least one supported assistant**: [Claude Code](https://claude.com/product/claude-code), [opencode](https://opencode.ai), [Cursor](https://cursor.com), [GitHub Copilot](https://github.com/features/copilot) in VS Code, [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli), or [OpenAI Codex CLI](https://developers.openai.com/codex). You can mix several in the same project.
-- Linux and macOS are the primary targets; Windows works via `cmd.exe`/PowerShell but is less battle-tested.
+- Linux, macOS, and Windows are all supported and all covered by CI.
 
 ---
 
 ## Install (once per machine)
 
 ```bash
-git clone https://github.com/null-result/kivax.git
-cd kivax
-python3 install.py
+pipx install kivax
 ```
 
-The installer copies the system into `~/.kivax` (the **global store**) and links the `kivax` command into a directory already on your PATH — it tries `~/.local/bin`, then `/usr/local/bin`. If it can't find one, it prints the exact `export PATH=...` line to add to your shell rc.
+Same command on Linux, macOS, and Windows.
 
-It is pure Python (no bash), so the same command works identically on Linux, macOS, and Windows, and it installs `pyyaml` automatically if it's missing. On Windows it also copies `kivax.bat`, needed because `cmd.exe` doesn't interpret the Python script's shebang line, and prints the folder to add to your PATH.
+[pipx](https://pipx.pypa.io) is the recommendation rather than plain `pip` because Kivax is an *application*, not a library you import: pipx puts it in its own virtualenv and links just the `kivax` command onto your PATH, so it can't collide with your projects' dependencies. It also sidesteps the "externally-managed-environment" error that `pip install` hits on Debian, Ubuntu, and Homebrew Python.
 
-**Install somewhere else** — set `KIVAX_HOME` before installing, and export the same value in your shell so the CLI can find the store:
+Plain pip works too, if you'd rather:
 
 ```bash
-KIVAX_HOME=/opt/kivax python3 install.py
+pip install --user kivax
 ```
+
+**Upgrade** — one command, and it's the whole story. The agents, skills, and templates Kivax installs into projects ship *inside* the package, so the CLI and the material it copies can never be out of step:
+
+```bash
+pipx upgrade kivax
+```
+
+That updates Kivax itself. It deliberately doesn't touch any project — run `kivax upgrade` inside each repository you want to bring current, and review the diff.
+
+**Uninstall** — `pipx uninstall kivax`.
 
 ### Verify
 
@@ -70,6 +76,14 @@ kivax version
 ```
 
 Should print the store path and the version. If you get `command not found`, see [Troubleshooting](#troubleshooting).
+
+> **Upgrading from 2.0 or earlier?** Kivax used to be installed by cloning this repository and running `install.py`, which left a store in `~/.kivax` and a `kivax` symlink in `~/.local/bin`. Neither is used any more. Delete both — if that old symlink sits earlier on your PATH it will keep shadowing the version you just installed. `kivax version` warns you when it spots the leftovers.
+>
+> ```bash
+> rm -rf ~/.kivax ~/.local/bin/kivax
+> ```
+>
+> Projects need no migration: everything `kivax init` wrote is committed in the repository already.
 
 ---
 
@@ -245,7 +259,7 @@ You rarely touch this yourself; `kivax-new` and `kivax-evolve` drive it. The com
 
 Two deliberately independent things:
 
-- **The CLI (`kivax`, `install.py`, the `lib/` scripts) is always in English.** Not configurable — it's infrastructure, not content, which keeps it maintainable and easy to get help with.
+- **The CLI (`kivax` and the `lib/` modules behind it) is always in English.** Not configurable — it's infrastructure, not content, which keeps it maintainable and easy to get help with.
 - **The specs' content follows `spec_language`**, a free-form value you set during `kivax init` (or edit later in `.kivax/config.yml`). The spec-analyst writes titles, descriptions, and acceptance criteria in that language regardless of what language you speak to it in — so you can converse in whatever you like and still guarantee specs land in, say, Spanish, if that's your team's documentation language.
 
 The agents and skills (the instructions the assistant reads) are written in English and don't change with `spec_language`. That doesn't affect what language the assistant replies to you in, which always follows the conversation.
@@ -352,18 +366,19 @@ A lesson is **never** a substitute for a requirement. If what the retro found is
 
 ## Project files and the global store
 
-`kivax init` copies agents, skills, and the orchestrator instructions into your project as real, ordinary, git-committed files. **Nothing in a project points back at `~/.kivax`** — every file is yours to open and edit, including changing an agent's `model:` line. This also means Kivax updates never change a project's behavior on their own: pulling in changes is always an explicit step (`kivax upgrade`), reviewable with `git diff` before you commit.
+`kivax init` copies agents, skills, and the orchestrator instructions into your project as real, ordinary, git-committed files. **Nothing in a project points back at the global store** — every file is yours to open and edit, including changing an agent's `model:` line. This also means Kivax updates never change a project's behavior on their own: pulling in changes is always an explicit step (`kivax upgrade`), reviewable with `git diff` before you commit.
+
+The global store is the "upstream" those copies come from, and it ships inside the installed package — that's why `pipx upgrade kivax` updates the CLI and the store as a single artifact, with no way for the two to disagree about which version they are. `kivax version` prints where it landed.
 
 ```
-~/.kivax/                              (global store, one per machine — the "upstream")
+<the installed package>/kivax/data/    (the global store — read-only, part of the install)
   agents/<name>.md                     (canonical: description + tools + body — one file per
                                          specialist, PLUS orchestrator.md, shared by every runtime)
   runtime/skills/                      (shared by all 6 runtimes — 6 reference skills +
                                          14 phase-driver skills, e.g. kivax-spec/, kivax-plan/)
-  lib/kivax_*.py                       (scripts, invoked via the CLI)
-  lib/agent_runtimes.yml               (per-runtime agent frontmatter recipe)
-  lib/kivax_agents.py                  (renders agents/*.md + agent_runtimes.yml into each
-                                         runtime's agent-file shape)
+  templates/                           (spec, plan, research, lesson… seeds)
+  agent_runtimes.yml                   (per-runtime agent frontmatter recipe)
+  stack_profiles.yml                   (the stack catalog the init wizard offers)
   templates/                           (spec, plan, research, principles, architecture, state, PR…)
   ci/                                  (sample CI gate workflow)
 
@@ -397,7 +412,7 @@ your-project/                          (all committed to git, no exceptions)
 
 SKILL.md content is identical across every runtime — only the destination directory changes.
 
-**Agent files are the one thing not copied verbatim.** Each specialist — and the orchestrator itself — has a single canonical source (`~/.kivax/agents/<name>.md`: description, tools, body, no runtime-specific frontmatter), and `kivax init`/`kivax upgrade` render it into every active runtime's own agent-file shape on the fly, per the recipe in `~/.kivax/lib/agent_runtimes.yml`. Fixing an instruction once fixes it everywhere instead of needing the same edit repeated per tool.
+**Agent files are the one thing not copied verbatim.** Each specialist — and the orchestrator itself — has a single canonical source (the store's `agents/<name>.md`: description, tools, body, no runtime-specific frontmatter), and `kivax init`/`kivax upgrade` render it into every active runtime's own agent-file shape on the fly, per the recipe in the store's `agent_runtimes.yml`. Fixing an instruction once fixes it everywhere instead of needing the same edit repeated per tool.
 
 The orchestrator's rendering is special in one way: besides landing as an ordinary agent file (`.claude/agents/orchestrator.md`, invokable explicitly on tools that support picking an agent), its frontmatter-stripped body is **also** what becomes `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` — the ambient context every runtime's default conversation reads. That's how the orchestrator is "the agent the human talks to" on tools without an agent picker.
 
@@ -455,7 +470,7 @@ You'll rarely type these — the assistant runs most of them for you. The ones y
 
 ## CI
 
-`~/.kivax/ci/github-actions-kivax.yml` (or `share/ci/` in this repo, if you haven't installed yet) is a sample CI gate: it validates the spec and runs `kivax trace`. It needs `kivax` installed on the runner — adjust the install step to however you distribute it (internal artifact, submodule, custom script). There's no single correct recipe there.
+The store's `ci/github-actions-kivax.yml` (in this repo: [src/kivax/data/ci/](src/kivax/data/ci/)) is a sample CI gate: it validates the spec and runs `kivax trace`. Installing Kivax on the runner is one line — `pip install kivax` — and the sample is copy-pasteable as-is. Pin the version (`kivax==2.1.0`) if you'd rather a release never changes what your gate accepts without you choosing it.
 
 ---
 
@@ -469,13 +484,10 @@ export PATH="$HOME/.kivax/bin:$PATH"
 ```
 
 **`ERROR: can't find the Kivax global store at ...`**
-You installed with a custom `KIVAX_HOME` but didn't export it in the shell running `kivax`. Export the same value, or re-run `python3 install.py` with the default.
+The store ships with the package, so this almost always means `KIVAX_HOME` is set (it overrides the packaged store) and points somewhere that isn't one. Unset it. If it isn't set, the install is damaged — `pipx install --force kivax`.
 
 **`ERROR: PyYAML is missing`**
-
-```bash
-pip install pyyaml --break-system-packages
-```
+Shouldn't happen: pip installs it as a dependency. It means the environment was modified after install — `pipx install --force kivax` rebuilds it.
 
 **`ERROR: .kivax/config.yml does not exist. Run 'kivax init' first.`**
 You're not at the project root, or the project was never initialized. The scripts walk up parent directories looking for `.kivax/config.yml`, so this means it isn't anywhere above you.
@@ -484,7 +496,11 @@ You're not at the project root, or the project was never initialized. The script
 The project was installed by an older Kivax, when the pipeline, the gates, and most paths were configurable. They aren't any more — Kivax owns the flow. Nothing is broken: those keys are simply ignored. Delete the ones doctor names, set `version: 3`, and the message goes away.
 
 **An edit I made to an agent or a skill file disappeared.**
-`kivax upgrade` rewrites those files from the global store — they're generated, not yours to edit. To change what an agent *does*, change it in `~/.kivax/agents/<name>.md` and re-run `kivax upgrade`. To change which model it runs on, use the `agents:` block in `.kivax/config.yml`, which upgrade never touches.
+`kivax upgrade` rewrites those files from the global store — they're generated, not yours to edit.
+
+- **To change which model an agent runs on**, use the `agents:` block in `.kivax/config.yml`. That's the supported knob, and upgrade never touches it.
+- **To change what an agent *does***, open an issue or a PR. The store lives inside the installed package and is replaced wholesale on every upgrade, so a local edit to it wouldn't survive either — behavior belongs upstream, where everyone gets the fix.
+- **If you genuinely need a divergent store** (a fork, an internal variant), point `KIVAX_HOME` at your own copy of `src/kivax/data`. Kivax will read that instead of the packaged one. You then own keeping it current — which is exactly the maintenance burden the packaged store exists to avoid, so weigh it before choosing this.
 
 **`ERROR running git diff against 'main'` from `kivax specfirst` or the audit.**
 The configured base branch doesn't exist locally. Fix `git.base_branch` in `.kivax/config.yml`, or fetch the branch.
@@ -508,11 +524,11 @@ The installer prints the folder to add to your PATH. From PowerShell, add `%USER
 
 ## Updating or uninstalling
 
-**Update the global store:** run `python3 install.py` again from a newer copy of the package (it overwrites `~/.kivax`). This does **not** touch any project by itself — run `kivax upgrade` inside each project you want to bring current.
+**Update Kivax:** `pipx upgrade kivax`. This does **not** touch any project by itself — run `kivax upgrade` inside each project you want to bring current.
 
 **Uninstall from a project:** delete `.claude/`, `.opencode/`, `.cursor/`, `.codex/`, `CLAUDE.md`, `AGENTS.md`, and `.kivax/`. For `.github/`, don't delete the whole directory — it commonly holds unrelated CI workflows and issue templates — remove only Kivax's own paths: `.github/agents/`, `.github/skills/`, and `.github/copilot-instructions.md`. You lose the state and the lock if you hadn't committed them; since everything here is a normal file, `git log` has your history regardless.
 
-**Uninstall from the system:** delete `~/.kivax` and the `kivax` entry it linked into your PATH (`~/.local/bin/kivax` or `/usr/local/bin/kivax`).
+**Uninstall from the system:** `pipx uninstall kivax`. If you ever installed a pre-2.1 version from a clone, also `rm -rf ~/.kivax ~/.local/bin/kivax`.
 
 ---
 
@@ -525,24 +541,27 @@ The flow drives **one active feature at a time per working tree** — `.kivax/st
 ## Repository layout (this repo)
 
 ```
-install.py            System-wide installer (copies share/ into ~/.kivax)
-bin/kivax             The CLI
-bin/kivax.bat         Windows wrapper for the CLI
+pyproject.toml        Packaging: console script, dependencies, package data
 assets/               Logo and other repo media
-share/
-  agents/             One canonical file per specialist (description + tools + body, no
+src/kivax/
+  cli.py              The CLI — every 'kivax <cmd>' entry point
+  lib/                kivax_*.py modules the CLI dispatches to (python -m kivax.lib.X),
+                       plus kivax_agents.py, the agent renderer
+  data/               THE GLOBAL STORE — shipped inside the wheel, copied into projects
+    agents/           One canonical file per specialist (description + tools + body, no
                        runtime-specific frontmatter), PLUS orchestrator.md — the primary
                        coordinator, rendered like every other agent and additionally
                        stripped of frontmatter to produce AGENTS.md / CLAUDE.md /
                        copilot-instructions.md. Nothing here is copied verbatim.
-  runtime/skills/     6 reference skills + 14 phase-driver skills, shared by all 6
+    runtime/skills/   6 reference skills + 14 phase-driver skills, shared by all 6
                        runtimes (just placed in each one's own skills directory)
-  lib/                kivax_*.py scripts the CLI dispatches to, the stack-profile catalog,
-                       agent_runtimes.yml, and kivax_agents.py (the renderer)
-  templates/          Starting scaffolds (spec, plan, research, principles, architecture,
+    templates/        Starting scaffolds (spec, plan, research, principles, architecture,
                        lesson, state, PR)
-  examples/           Ready-to-copy extensions, e.g. custom-phases (deploy + regression)
-  ci/                 Sample CI gate workflow
+    ci/               Sample CI gate workflow
+    stack_profiles.yml  The stack catalog the init wizard offers
+    agent_runtimes.yml  Per-runtime agent frontmatter recipe
+    VERSION           Single source of truth: the distribution version and what
+                       'kivax version' reports
 ```
 
 ## Contributing
@@ -550,9 +569,9 @@ share/
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers running the test suite, how the repository is laid out, and the conventions that aren't obvious from the code — chiefly that agents and skills are documentation the assistant *executes*, so they change alongside the CLI.
 
 ```bash
-pytest tests                                                             # unit + integration + e2e
-pytest tests --cov=. --cov-config=.coveragerc --cov-report=term-missing  # coverage gate (>= 90%)
-ruff check . bin/kivax                                                   # lint
+pytest tests                                                          # unit + integration + e2e
+pytest tests --cov --cov-config=.coveragerc --cov-report=term-missing # coverage gate (>= 90%)
+ruff check .                                                          # lint
 ```
 
 ## License
