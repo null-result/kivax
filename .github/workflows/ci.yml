@@ -166,8 +166,17 @@ jobs:
           # Project setup is a precondition of the first feature, and it's the
           # kivax-setup skill (i.e. an assistant) that writes these two. No
           # assistant here, so assert the refusal, then stand in for it.
-          ! "$VBIN/kivax" feature new checkout
-          "$VBIN/kivax" feature new checkout 2>&1 | grep -q "hasn't been set up yet"
+          # Captured, not piped: `shell: bash` (needed for the Windows leg of
+          # this matrix) turns on pipefail, and a pipeline whose first command
+          # fails ON PURPOSE would then fail the step. One invocation asserts
+          # both halves — that it refuses, and that it says why.
+          if refusal="$("$VBIN/kivax" feature new checkout 2>&1)"; then
+            echo "expected 'feature new' to be refused before project setup, got success:"
+            echo "$refusal"
+            exit 1
+          fi
+          echo "$refusal"
+          echo "$refusal" | grep -q "hasn't been set up yet"
           printf '# Principles\n' > PRINCIPLES.md
           printf '# Architecture\n' > ARCHITECTURE.md
           "$VBIN/kivax" feature new checkout
